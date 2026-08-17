@@ -1,0 +1,12 @@
+# OPI DataProcessingUnit with no hardware identity. The NVIDIA VSP
+# (cmd/vsp) stamps provisioning.dpu.nvidia.com/serial-number after it
+# enumerates a (mock or PCI) BlueField. The translation controller then
+# emits DPUDevice + DPUFlavor + BFB + DPU.
+apiVersion: config.openshift.io/v1
+kind: DataProcessingUnit
+metadata:
+  name: bf3-worker
+spec:
+  dpuProductName: BlueField-3
+  isDpuSide: false
+  nodeName: kind-worker
