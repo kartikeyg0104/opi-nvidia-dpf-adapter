@@ -1,0 +1,47 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - dataprocessingunits
+  - servicefunctionchains
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - dataprocessingunits/status
+  - servicefunctionchains/status
+  verbs:
+  - get
+- apiGroups:
+  - provisioning.dpu.nvidia.com
+  resources:
+  - bfbs
+  - dpudevices
+  - dpuflavors
+  - dpus
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - svc.dpu.nvidia.com
+  resources:
+  - dpuservices
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch

@@ -1,0 +1,80 @@
+apiVersion: translation.opi.nvidia.com/v1alpha1
+kind: FieldMapping
+metadata:
+  name: dataprocessingunit
+  description: |
+    One OPI DataProcessingUnit expands into the DPF objects a DPU cannot
+    exist without. Direct copies are JSONPath; everything DPF requires
+    that OPI does not have is a CEL expression or a literal default.
+    Serial numbers are not invented — they must be supplied as an annotation
+    until the NVIDIA VSP can discover them from hardware.
+source:
+  group: config.openshift.io
+  version: v1
+  kind: DataProcessingUnit
+emit:
+  - target:
+      group: provisioning.dpu.nvidia.com
+      version: v1alpha1
+      kind: DPUDevice
+    name:
+      cel: "source.metadata.name + '-device'"
+    namespace:
+      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
+    fields:
+      - to: spec.serialNumber
+        cel: "source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue('')"
+        required: true
+
+  - target:
+      group: provisioning.dpu.nvidia.com
+      version: v1alpha1
+      kind: DPUFlavor
+    name:
+      cel: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('dpf-default-flavor')"
+    namespace:
+      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
+    fields:
+      - to: spec.dpuMode
+        value: dpu
+
+  - target:
+      group: provisioning.dpu.nvidia.com
+      version: v1alpha1
+      kind: BFB
+    name:
+      cel: "source.metadata.?annotations['dpu.nvidia.com/bfb'].orValue('bf-bundle')"
+    namespace:
+      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
+    fields:
+      - to: spec.url
+        cel: "source.metadata.?annotations['dpu.nvidia.com/bfb-url'].orValue('')"
+        required: true
+
+  - target:
+      group: provisioning.dpu.nvidia.com
+      version: v1alpha1
+      kind: DPU
+    name:
+      from: metadata.name
+    namespace:
+      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
+    fields:
+      # 1:1 JSONPath copies
+      - to: spec.dpuNodeName
+        from: spec.nodeName
+        required: true
+      # Required DPF fields with no OPI counterpart — defaults / annotations
+      - to: spec.dpuDeviceName
+        cel: "source.metadata.name + '-device'"
+      - to: spec.dpuFlavor
+        cel: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('dpf-default-flavor')"
+      - to: spec.bfb.name
+        cel: "source.metadata.?annotations['dpu.nvidia.com/bfb'].orValue('bf-bundle')"
+      - to: spec.serialNumber
+        cel: "source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue('')"
+        required: true
+      # CEL-enforced "exactly one of" nodeEffect shapes: noEffect is the
+      # safe local-dev default (no host drain, no taint).
+      - to: spec.nodeEffect.noEffect
+        value: true

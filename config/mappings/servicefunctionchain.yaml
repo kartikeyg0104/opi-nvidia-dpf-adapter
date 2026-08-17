@@ -1,0 +1,38 @@
+apiVersion: translation.opi.nvidia.com/v1alpha1
+kind: FieldMapping
+metadata:
+  name: servicefunctionchain
+  description: |
+    Each NetworkFunction with a Helm chart becomes a DPUService.
+    Image-only network functions are skipped: DPF has no field that
+    accepts a bare container image. That is the image-versus-chart
+    mismatch; the OPI API upgrade (Chart *HelmChartSource) is the
+    source side of this mapping.
+source:
+  group: config.openshift.io
+  version: v1
+  kind: ServiceFunctionChain
+emit:
+  - target:
+      group: svc.dpu.nvidia.com
+      version: v1alpha1
+      kind: DPUService
+    forEach:
+      in: spec.networkFunctions
+    when: "'chart' in item"
+    name:
+      cel: "item.name"
+    namespace:
+      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
+    fields:
+      - to: spec.serviceID
+        from: item.name
+        required: true
+      - to: spec.helmChart.source.repoURL
+        cel: "item.chart.repository"
+        required: true
+      - to: spec.helmChart.source.version
+        cel: "item.chart.version"
+        required: true
+      - to: spec.paused
+        value: false
