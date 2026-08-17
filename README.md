@@ -39,15 +39,25 @@ Run the operator against a cluster that already has the OPI and DPF CRDs:
 go run ./cmd/main.go --mapping-dir=config/mappings --metrics-bind-address=0
 ```
 
-Hardware identity such as `serialNumber` is **not** invented. Until the
-NVIDIA VSP can discover it, set:
+Hardware identity such as `serialNumber` is **not** invented. The
+translation engine reads it from annotations. The NVIDIA VSP
+(`cmd/vsp`) stamps those annotations after it enumerates hardware.
 
-```yaml
-metadata:
-  annotations:
-    provisioning.dpu.nvidia.com/serial-number: "MT1234"
-    dpu.nvidia.com/bfb-url: "https://example.invalid/fw.bfb"
+Local mock (no BlueField on the PCI bus):
+
+```sh
+go run ./cmd/vsp --metrics-bind-address=0 \
+  --node-name=kind-worker \
+  --serial-number=MT25066004A1 \
+  --bfb-url=https://example.invalid/fw.bfb
 ```
+
+Apply `config/samples/dataprocessingunit.yaml` (no serial annotation).
+The VSP patches `provisioning.dpu.nvidia.com/serial-number`; the
+translator then emits DPUDevice + DPUFlavor + BFB + DPU.
+
+See [docs/vsp.md](docs/vsp.md) for how this maps onto the Intel and
+Marvell VSPs in `openshift/dpu-operator`.
 
 ## Description
 Companion adapter for the OPI DPU Operator. It does not own OPI CRDs.

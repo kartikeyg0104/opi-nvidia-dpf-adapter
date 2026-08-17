@@ -6,8 +6,8 @@ metadata:
     One OPI DataProcessingUnit expands into the DPF objects a DPU cannot
     exist without. Direct copies are JSONPath; everything DPF requires
     that OPI does not have is a CEL expression or a literal default.
-    Serial numbers are not invented — they must be supplied as an annotation
-    until the NVIDIA VSP can discover them from hardware.
+    Serial numbers are not invented. cmd/vsp stamps them as annotations
+    after enumerating hardware (mock locally, PCI on a real worker).
 source:
   group: config.openshift.io
   version: v1

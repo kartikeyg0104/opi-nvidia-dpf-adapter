@@ -1,0 +1,40 @@
+# Local-dev DaemonSet. On kind there is no BlueField; the mock enumerator
+# stamps --serial-number onto every DataProcessingUnit whose spec.nodeName
+# matches this node. Replace the mock flags with --pci on real hardware.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-vsp
+  namespace: system
+  labels:
+    app.kubernetes.io/name: opi-nvidia-dpf-adapter
+    app.kubernetes.io/component: vsp
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: vsp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: vsp
+    spec:
+      serviceAccountName: nvidia-vsp
+      hostNetwork: true
+      containers:
+      - name: vsp
+        image: controller:latest
+        command:
+        - /vsp
+        args:
+        - --metrics-bind-address=0
+        - --serial-number=$(DPU_SERIAL_NUMBER)
+        - --bfb-url=$(DPU_BFB_URL)
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: DPU_SERIAL_NUMBER
+          value: MT25066004A1
+        - name: DPU_BFB_URL
+          value: https://example.invalid/fw.bfb
