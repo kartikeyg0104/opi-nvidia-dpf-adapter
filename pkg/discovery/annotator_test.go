@@ -31,17 +31,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+const (
+	testNode    = "kind-worker"
+	testSerial  = "MT25066004A1"
+	testPCI     = "0000:03:00.0"
+	testProduct = "BlueField-3"
+	testDPUName = "bf3-worker"
+	testBFBURL  = "https://example.invalid/fw.bfb"
+)
+
+func mockDevices() MockEnumerator {
+	return MockEnumerator{Devices: []Device{StaticDevice(testSerial, testPCI, testProduct)}}
+}
+
 func TestAnnotatorStampsSerialOnMatchingNode(t *testing.T) {
 	scheme := newDPUScheme(t)
-	dpu := newDPU("bf3-worker", "kind-worker")
+	dpu := newDPU(testDPUName, testNode)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dpu).Build()
 
 	a := &Annotator{
 		Client:     c,
 		Scheme:     scheme,
-		Enumerator: MockEnumerator{Devices: []Device{StaticDevice("MT25066004A1", "0000:03:00.0", "BlueField-3")}},
-		NodeName:   "kind-worker",
-		BFBURL:     "https://example.invalid/fw.bfb",
+		Enumerator: mockDevices(),
+		NodeName:   testNode,
+		BFBURL:     testBFBURL,
 	}
 
 	if _, err := a.Reconcile(context.Background(), requestFor(dpu)); err != nil {
@@ -50,14 +63,14 @@ func TestAnnotatorStampsSerialOnMatchingNode(t *testing.T) {
 
 	got := &unstructured.Unstructured{}
 	got.SetGroupVersionKind(DataProcessingUnitGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "bf3-worker"}, got); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: testDPUName}, got); err != nil {
 		t.Fatal(err)
 	}
 	ann := got.GetAnnotations()
-	if ann[SerialNumberAnnotation] != "MT25066004A1" {
+	if ann[SerialNumberAnnotation] != testSerial {
 		t.Fatalf("serial annotation=%q", ann[SerialNumberAnnotation])
 	}
-	if ann[BFBURLAnnotation] != "https://example.invalid/fw.bfb" {
+	if ann[BFBURLAnnotation] != testBFBURL {
 		t.Fatalf("bfb-url annotation=%q", ann[BFBURLAnnotation])
 	}
 }
@@ -70,8 +83,8 @@ func TestAnnotatorSkipsOtherNodes(t *testing.T) {
 	a := &Annotator{
 		Client:     c,
 		Scheme:     scheme,
-		Enumerator: MockEnumerator{Devices: []Device{StaticDevice("MT25066004A1", "0000:03:00.0", "BlueField-3")}},
-		NodeName:   "kind-worker",
+		Enumerator: mockDevices(),
+		NodeName:   testNode,
 	}
 
 	if _, err := a.Reconcile(context.Background(), requestFor(dpu)); err != nil {
@@ -90,15 +103,15 @@ func TestAnnotatorSkipsOtherNodes(t *testing.T) {
 
 func TestAnnotatorIsIdempotent(t *testing.T) {
 	scheme := newDPUScheme(t)
-	dpu := newDPU("bf3-worker", "kind-worker")
-	dpu.SetAnnotations(map[string]string{SerialNumberAnnotation: "MT25066004A1"})
+	dpu := newDPU(testDPUName, testNode)
+	dpu.SetAnnotations(map[string]string{SerialNumberAnnotation: testSerial})
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dpu).Build()
 
 	a := &Annotator{
 		Client:     c,
 		Scheme:     scheme,
-		Enumerator: MockEnumerator{Devices: []Device{StaticDevice("MT25066004A1", "0000:03:00.0", "BlueField-3")}},
-		NodeName:   "kind-worker",
+		Enumerator: mockDevices(),
+		NodeName:   testNode,
 	}
 
 	if _, err := a.Reconcile(context.Background(), requestFor(dpu)); err != nil {
@@ -108,14 +121,14 @@ func TestAnnotatorIsIdempotent(t *testing.T) {
 
 func TestAnnotatorRejectsEmptySerial(t *testing.T) {
 	scheme := newDPUScheme(t)
-	dpu := newDPU("bf3-worker", "kind-worker")
+	dpu := newDPU(testDPUName, testNode)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dpu).Build()
 
 	a := &Annotator{
 		Client:     c,
 		Scheme:     scheme,
-		Enumerator: MockEnumerator{Devices: []Device{{PCIAddress: "0000:03:00.0"}}},
-		NodeName:   "kind-worker",
+		Enumerator: MockEnumerator{Devices: []Device{{PCIAddress: testPCI}}},
+		NodeName:   testNode,
 	}
 
 	if _, err := a.Reconcile(context.Background(), requestFor(dpu)); err == nil {
@@ -141,7 +154,8 @@ func newDPUScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
 	s.AddKnownTypeWithName(DataProcessingUnitGVK, &unstructured.Unstructured{})
-	s.AddKnownTypeWithName(DataProcessingUnitGVK.GroupVersion().WithKind("DataProcessingUnitList"), &unstructured.UnstructuredList{})
+	listGVK := DataProcessingUnitGVK.GroupVersion().WithKind("DataProcessingUnitList")
+	s.AddKnownTypeWithName(listGVK, &unstructured.UnstructuredList{})
 	metav1.AddToGroupVersion(s, DataProcessingUnitGVK.GroupVersion())
 	return s
 }
@@ -151,7 +165,7 @@ func newDPU(name, node string) *unstructured.Unstructured {
 	dpu.SetGroupVersionKind(DataProcessingUnitGVK)
 	dpu.SetName(name)
 	_ = unstructured.SetNestedField(dpu.Object, node, "spec", "nodeName")
-	_ = unstructured.SetNestedField(dpu.Object, "BlueField-3", "spec", "dpuProductName")
+	_ = unstructured.SetNestedField(dpu.Object, testProduct, "spec", "dpuProductName")
 	_ = unstructured.SetNestedField(dpu.Object, false, "spec", "isDpuSide")
 	return dpu
 }

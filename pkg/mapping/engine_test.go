@@ -22,6 +22,11 @@ import (
 	"testing"
 )
 
+const (
+	testNodeName = "kind-worker"
+	testNFName   = "hbn"
+)
+
 func TestApplyNodeNameMapping(t *testing.T) {
 	spec := &Spec{
 		APIVersion: APIVersion,
@@ -29,20 +34,25 @@ func TestApplyNodeNameMapping(t *testing.T) {
 		Metadata:   Metadata{Name: "dpu"},
 		Source:     ObjectRef{Group: "config.openshift.io", Version: "v1", Kind: "DataProcessingUnit"},
 		Emit: []Emit{{
-			Target:    ObjectRef{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPU"},
-			Name:      Value{From: "metadata.name"},
-			Namespace: Value{CEL: `source.metadata.?namespace.orValue('') != "" ? source.metadata.namespace : "dpf-operator-system"`},
+			Target: ObjectRef{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPU"},
+			Name:   Value{From: "metadata.name"},
+			Namespace: Value{CEL: `source.metadata.?namespace.orValue('') != "" ` +
+				`? source.metadata.namespace : "dpf-operator-system"`},
 			Fields: []Field{
 				{To: "spec.dpuNodeName", From: "spec.nodeName"},
 				{To: "spec.nodeEffect.noEffect", Value: true},
-				{To: "spec.dpuFlavor", CEL: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('')", Default: "dpf-default-flavor"},
+				{
+					To:      "spec.dpuFlavor",
+					CEL:     "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('')",
+					Default: "dpf-default-flavor",
+				},
 			},
 		}},
 	}
-	source := map[string]any{
-		"metadata": map[string]any{"name": "worker-1"},
-		"spec":     map[string]any{"nodeName": "kind-worker", "dpuProductName": "BlueField-3"},
-	}
+	source := object(
+		map[string]any{"name": "worker-1"},
+		map[string]any{"nodeName": testNodeName, "dpuProductName": "BlueField-3"},
+	)
 	objs, err := Apply(spec, source)
 	if err != nil {
 		t.Fatal(err)
@@ -57,16 +67,13 @@ func TestApplyNodeNameMapping(t *testing.T) {
 	if u.GetNamespace() != "dpf-operator-system" {
 		t.Errorf("namespace=%s", u.GetNamespace())
 	}
-	node, _, _ := unstructuredNested(u.Object, "spec", "dpuNodeName")
-	if node != "kind-worker" {
+	if node := nested(u.Object, "spec", "dpuNodeName"); node != testNodeName {
 		t.Errorf("dpuNodeName=%v", node)
 	}
-	noEffect, _, _ := unstructuredNested(u.Object, "spec", "nodeEffect", "noEffect")
-	if noEffect != true {
+	if noEffect := nested(u.Object, "spec", "nodeEffect", "noEffect"); noEffect != true {
 		t.Errorf("noEffect=%v", noEffect)
 	}
-	flavor, _, _ := unstructuredNested(u.Object, "spec", "dpuFlavor")
-	if flavor != "dpf-default-flavor" {
+	if flavor := nested(u.Object, "spec", "dpuFlavor"); flavor != "dpf-default-flavor" {
 		t.Errorf("dpuFlavor=%v (annotation missing, default should apply)", flavor)
 	}
 }
@@ -89,19 +96,19 @@ func TestApplyForEachChart(t *testing.T) {
 			},
 		}},
 	}
-	source := map[string]any{
-		"metadata": map[string]any{"name": "chain-1", "namespace": "default"},
-		"spec": map[string]any{
+	source := object(
+		map[string]any{"name": "chain-1", "namespace": "default"},
+		map[string]any{
 			"networkFunctions": []any{
 				map[string]any{"name": "legacy-fw", "image": "nginx:latest"},
-				map[string]any{"name": "hbn", "chart": map[string]any{
+				map[string]any{"name": testNFName, "chart": map[string]any{
 					"repository": "https://helm.ngc.nvidia.com/nvidia/doca",
-					"name":       "hbn",
+					"name":       testNFName,
 					"version":    "v25.10.1",
 				}},
 			},
 		},
-	}
+	)
 	objs, err := Apply(spec, source)
 	if err != nil {
 		t.Fatal(err)
@@ -109,10 +116,10 @@ func TestApplyForEachChart(t *testing.T) {
 	if len(objs) != 1 {
 		t.Fatalf("got %d objects, want 1 (image-only NF skipped)", len(objs))
 	}
-	if objs[0].GetName() != "hbn" {
+	if objs[0].GetName() != testNFName {
 		t.Errorf("name=%s", objs[0].GetName())
 	}
-	url, _, _ := unstructuredNested(objs[0].Object, "spec", "helmChart", "source", "repoURL")
+	url := nested(objs[0].Object, "spec", "helmChart", "source", "repoURL")
 	if url != "https://helm.ngc.nvidia.com/nvidia/doca" {
 		t.Errorf("repoURL=%v", url)
 	}
@@ -131,16 +138,16 @@ func TestLoadRealMappings(t *testing.T) {
 		t.Fatalf("expected dataprocessingunit + servicefunctionchain mappings, got %d", len(specs))
 	}
 
-	dpuSrc := map[string]any{
-		"metadata": map[string]any{
+	dpuSrc := object(
+		map[string]any{
 			"name": "worker-1",
 			"annotations": map[string]any{
 				"provisioning.dpu.nvidia.com/serial-number": "MT1234",
 				"dpu.nvidia.com/bfb-url":                    "https://example.invalid/bf.bfb",
 			},
 		},
-		"spec": map[string]any{"nodeName": "kind-worker"},
-	}
+		map[string]any{"nodeName": testNodeName},
+	)
 	var dpuSpec *Spec
 	for _, s := range specs {
 		if s.Metadata.Name == "dataprocessingunit" {
@@ -193,18 +200,22 @@ emit:
 	}
 }
 
-func unstructuredNested(obj map[string]any, keys ...string) (any, bool, error) {
+func object(meta, spec map[string]any) map[string]any {
+	return map[string]any{"metadata": meta, "spec": spec}
+}
+
+func nested(obj map[string]any, keys ...string) any {
 	cur := any(obj)
 	for _, k := range keys {
 		m, ok := asMap(cur)
 		if !ok {
-			return nil, false, nil
+			return nil
 		}
 		next, ok := m[k]
 		if !ok {
-			return nil, false, nil
+			return nil
 		}
 		cur = next
 	}
-	return cur, true, nil
+	return cur
 }

@@ -64,8 +64,10 @@ func main() {
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "metrics listen address; 0 disables")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8082", "health probe listen address")
-	flag.StringVar(&nodeName, "node-name", os.Getenv("NODE_NAME"), "only stamp DataProcessingUnits whose spec.nodeName matches")
-	flag.StringVar(&serialNumber, "serial-number", os.Getenv("DPU_SERIAL_NUMBER"), "mock BlueField serial (required unless --pci)")
+	flag.StringVar(&nodeName, "node-name", os.Getenv("NODE_NAME"),
+		"only stamp DataProcessingUnits whose spec.nodeName matches")
+	flag.StringVar(&serialNumber, "serial-number", os.Getenv("DPU_SERIAL_NUMBER"),
+		"mock BlueField serial (required unless --pci)")
 	flag.StringVar(&pciAddress, "pci-address", "0000:03:00.0", "mock PCI address recorded in logs")
 	flag.StringVar(&productName, "product-name", "BlueField-3", "mock DPU product name")
 	flag.StringVar(&bfbURL, "bfb-url", os.Getenv("DPU_BFB_URL"), "optional BFB URL annotation")
@@ -83,7 +85,7 @@ func main() {
 		enumerator = discovery.PCIEnumerator{}
 	} else {
 		if serialNumber == "" {
-			setupLog.Error(nil, "either --serial-number or --pci is required")
+			setupLog.Info("either --serial-number or --pci is required")
 			os.Exit(1)
 		}
 		enumerator = discovery.MockEnumerator{
