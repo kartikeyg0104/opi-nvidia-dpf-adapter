@@ -96,7 +96,11 @@ func (r *TranslationReconciler) applyOne(ctx context.Context, src, obj *unstruct
 	}
 
 	obj.SetManagedFields(nil)
-	return r.Patch(ctx, obj, client.Apply, client.ForceOwnership, client.FieldOwner(fieldOwner))
+	return r.Apply(ctx,
+		client.ApplyConfigurationFromUnstructured(obj),
+		client.ForceOwnership,
+		client.FieldOwner(fieldOwner),
+	)
 }
 
 // SetupWithManager watches the mapping's source GVK.

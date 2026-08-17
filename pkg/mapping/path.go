@@ -31,7 +31,7 @@ func Get(obj map[string]any, path string) (any, bool) {
 		return obj, true
 	}
 	var cur any = obj
-	for _, p := range strings.Split(path, ".") {
+	for p := range strings.SplitSeq(path, ".") {
 		m, ok := asMap(cur)
 		if !ok {
 			return nil, false

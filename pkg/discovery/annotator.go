@@ -19,6 +19,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -96,9 +97,7 @@ func (a *Annotator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	if ann == nil {
 		ann = map[string]string{}
 	}
-	for k, v := range desired {
-		ann[k] = v
-	}
+	maps.Copy(ann, desired)
 	dpu.SetAnnotations(ann)
 
 	if err := a.Patch(ctx, dpu, client.MergeFrom(orig)); err != nil {
