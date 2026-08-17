@@ -1,0 +1,11 @@
+# FieldMapping YAML is the translation data plane. This kustomization
+# packages those files as a ConfigMap so the manager can mount them at
+# /mappings. Files must live in this directory: kustomize will not load
+# paths that escape the kustomization root (that is what broke `make deploy`).
+configMapGenerator:
+- name: mappings
+  files:
+  - dataprocessingunit.yaml
+  - servicefunctionchain.yaml
+generatorOptions:
+  disableNameSuffixHash: true

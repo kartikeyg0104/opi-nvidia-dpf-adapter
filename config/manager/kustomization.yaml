@@ -1,9 +1,2 @@
 resources:
 - manager.yaml
-
-configMapGenerator:
-- name: mappings
-  files:
-  - dataprocessingunit.yaml=../mappings/dataprocessingunit.yaml
-  - servicefunctionchain.yaml=../mappings/servicefunctionchain.yaml
-
