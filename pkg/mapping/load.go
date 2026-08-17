@@ -41,7 +41,9 @@ func LoadFile(path string) (*Spec, error) {
 	return &s, nil
 }
 
-// LoadDir reads every *.yaml / *.yml file in dir.
+// LoadDir reads FieldMapping documents in dir. Kustomize overlays
+// (kustomization.yaml) are skipped so the same directory can both ship
+// mapping YAML and generate the in-cluster ConfigMap.
 func LoadDir(dir string) ([]*Spec, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -53,7 +55,7 @@ func LoadDir(dir string) ([]*Spec, error) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+		if !isMappingFile(name) {
 			continue
 		}
 		s, err := LoadFile(filepath.Join(dir, name))
@@ -66,4 +68,12 @@ func LoadDir(dir string) ([]*Spec, error) {
 		return nil, fmt.Errorf("no FieldMapping documents in %s", dir)
 	}
 	return specs, nil
+}
+
+func isMappingFile(name string) bool {
+	lower := strings.ToLower(name)
+	if lower == "kustomization.yaml" || lower == "kustomization.yml" || lower == "kustomize.yaml" {
+		return false
+	}
+	return strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 }
