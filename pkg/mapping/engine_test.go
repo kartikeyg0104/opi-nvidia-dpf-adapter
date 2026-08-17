@@ -191,6 +191,10 @@ emit:
 	if err := os.WriteFile(filepath.Join(dir, "dpu.yaml"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	kustomize := []byte("configMapGenerator:\n- name: mappings\n  files:\n  - dpu.yaml\n")
+	if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), kustomize, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	specs, err := LoadDir(dir)
 	if err != nil {
 		t.Fatal(err)
