@@ -72,7 +72,8 @@ var _ = BeforeSuite(func() {
 
 	cfg, err = testEnv.Start()
 	if err != nil {
-		Skip("envtest binaries not available: " + err.Error())
+		logf.Log.Info("envtest unavailable; fake-client specs still run", "error", err.Error())
+		return
 	}
 	Expect(cfg).NotTo(BeNil())
 
