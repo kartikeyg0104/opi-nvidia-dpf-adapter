@@ -1,50 +1,141 @@
 # opi-nvidia-dpf-adapter
 
-NVIDIA companion operator that translates OPI objects
-(`DataProcessingUnit`, `ServiceFunctionChain` from
-[`opiproject/dpu-operator`](https://github.com/opiproject/dpu-operator);
-OpenShift downstream is [`openshift/dpu-operator`](https://github.com/openshift/dpu-operator))
-into DPF objects (`DPU`, `DPUService`, … from
-[`NVIDIA/doca-platform`](https://github.com/NVIDIA/doca-platform)).
+Companion operator that translates OPI cluster objects into NVIDIA DPF
+objects. NVIDIA-specific code lives **here**, not in-tree in
+[`opiproject/dpu-operator`](https://github.com/opiproject/dpu-operator)
+(OpenShift downstream: [`openshift/dpu-operator`](https://github.com/openshift/dpu-operator)).
 
 This is the Kubernetes analogue of
 [`opi-nvidia-bridge`](https://github.com/opiproject/opi-nvidia-bridge):
-NVIDIA-specific code lives **here**, not in-tree in `dpu-operator`.
-
-The OPI→DPF field mapping is **data**. The controller loads
-`config/mappings/*.yaml` (CEL + JSONPath) and interprets them. There is
-no `switch obj.GetKind()` and no hardcoded struct copies. See
-[docs/mapping-spec.md](docs/mapping-spec.md).
+vendor knowledge is a sidecar to upstream, not a fork of it.
 
 ```
-OPI DataProcessingUnit  --mapping yaml-->  DPUDevice + DPUFlavor + BFB + DPU
-OPI ServiceFunctionChain --mapping yaml-->  DPUService (one per Helm chart NF)
+OPI DataProcessingUnit   --FieldMapping YAML-->  DPUDevice + DPUFlavor + BFB + DPU
+OPI ServiceFunctionChain --FieldMapping YAML-->  DPUService (one per Helm chart NF)
 ```
 
-## Mapping files
+Upstream OPI CRDs come from `opiproject/dpu-operator`. Downstream DPF
+CRDs come from [`NVIDIA/doca-platform`](https://github.com/NVIDIA/doca-platform).
+This repo owns neither API. It watches unstructured objects and applies
+unstructured objects.
+
+## Why a companion repo
+
+The OPI DPU Operator is vendor-neutral. Intel and Marvell Vendor-Specific
+Plugins (VSPs) already live in-tree as gRPC servers the node daemon
+dials. NVIDIA DPF is a different control plane: provisioning is
+declarative CRDs (`DPU`, `DPUService`, Helm charts), not an imperative
+`CreateNetworkFunction` implementation inside the daemon.
+
+Putting NVIDIA field copies and BlueField PCI scans into
+`dpu-operator` would:
+
+- encode one vendor's object model in the shared operator
+- force every OPI→DPF schema change through that repo's review
+- break the TSC rule that OPI stays hardware-agnostic
+
+The adapter therefore has two processes:
+
+| Binary | Role |
+|---|---|
+| `cmd/main.go` | Cluster translator. Loads `config/mappings/*.yaml`, watches OPI GVKs, SSA-applies DPF GVKs. |
+| `cmd/vsp` | Node plugin. Enumerates BlueField hardware, annotates `DataProcessingUnit`, serves the daemon's unix-socket gRPC. |
+
+No `switch obj.GetKind()`. No imported OPI or DPF Go structs in the
+translator. GVKs are registered with `scheme.AddKnownTypeWithName` on
+`unstructured.Unstructured`, the same trick the fake-client tests use.
+
+## Translation engine
+
+The mapping is **data**. `TranslationReconciler` is generic: it takes a
+`mapping.Spec`, `Get`s the source object, calls `mapping.Apply`, and
+applies each emitted object with server-side apply
+(`client.ApplyConfigurationFromUnstructured`).
+
+Concrete documents:
 
 | File | Watches | Emits |
 |---|---|---|
-| `config/mappings/dataprocessingunit.yaml` | `config.openshift.io/v1 DataProcessingUnit` | `DPUDevice`, `DPUFlavor`, `BFB`, `DPU` |
-| `config/mappings/servicefunctionchain.yaml` | `config.openshift.io/v1 ServiceFunctionChain` | `DPUService` per `networkFunctions[].chart` |
+| [`config/mappings/dataprocessingunit.yaml`](config/mappings/dataprocessingunit.yaml) | `config.openshift.io/v1 DataProcessingUnit` | `DPUDevice`, `DPUFlavor`, `BFB`, `DPU` |
+| [`config/mappings/servicefunctionchain.yaml`](config/mappings/servicefunctionchain.yaml) | `config.openshift.io/v1 ServiceFunctionChain` | `DPUService` per `networkFunctions[].chart` |
 
-Run the interpreter without a cluster:
+Each field is exactly one of:
+
+- `from` — dotted JSONPath (`spec.nodeName` → `spec.dpuNodeName`)
+- `cel` — CEL over `source` and `item` (`'chart' in item`, annotation keys with `/`)
+- `value` — literal (DPF-required fields OPI does not have, e.g. `spec.nodeEffect.noEffect: true`)
+
+`forEach` + `when` is how one ServiceFunctionChain becomes N DPUServices
+and how a bare `image` NF is skipped (DPF has no field for a raw
+container image). Image-versus-chart is an OPI API upgrade
+([`opiproject/dpu-operator#6`](https://github.com/opiproject/dpu-operator/pull/6));
+the YAML is the NVIDIA consumer of that `HelmChartSource`.
+
+Schema and rules for what Go may not do:
+[docs/mapping-spec.md](docs/mapping-spec.md).
 
 ```sh
-go test ./pkg/mapping/ -count=1
+go test ./pkg/mapping/ ./internal/controller/ -count=1
 ```
 
-Run the operator against a cluster that already has the OPI and DPF CRDs:
+The controller tests use `client/fake` plus unstructured GVK
+registration. They load the real mapping YAML and assert a chart NF
+emits `spec.helmChart.source.repoURL` / `version`, while an image-only
+NF yields `NotFound`.
 
-```sh
-go run ./cmd/main.go --mapping-dir=config/mappings --metrics-bind-address=0
+## Vendor-Specific Plugin
+
+Intel/Marvell VSPs **are** the source of truth the in-tree daemon
+consumes over a unix socket. This translator is **not**. It only reads
+annotations on the OPI `DataProcessingUnit`:
+
+- `provisioning.dpu.nvidia.com/serial-number`
+- `dpu.nvidia.com/bfb-url`
+
+`cmd/vsp` is the missing link. It enumerates hardware (mock flags on
+kind, sysfs PCI on a worker) and patches those annotations. The mapping
+YAML then copies them into DPF `serialNumber` / BFB URL. Serials are
+never invented in Go.
+
+```mermaid
+flowchart LR
+  subgraph node [Worker]
+    PCI["PCI sysfs 0x15b3 fn 0"]
+    VSP["cmd/vsp"]
+    Sock["vendor-plugin.sock"]
+    DPU["DataProcessingUnit"]
+    TR["TranslationReconciler"]
+  end
+  Daemon["dpu-operator daemon"] -->|Init GetDevices CreateNetworkFunction| Sock
+  PCI --> VSP
+  VSP --> Sock
+  VSP -->|annotate serial| DPU
+  DPU --> TR
+  TR -->|SSA| DPF["DPUDevice DPUFlavor BFB DPU"]
 ```
 
-Hardware identity such as `serialNumber` is **not** invented. The
-translation engine reads it from annotations. The NVIDIA VSP
-(`cmd/vsp`) stamps those annotations after it enumerates hardware.
+One listener multiplexes:
 
-Local mock (no BlueField on the PCI bus):
+- `opi_api.lifecycle.v1alpha1` LifeCycle/DeviceService — what
+  `GrpcPlugin` currently dials for `Init` / `GetDevices`
+- `Vendor.*` LifeCycle/Device/NetworkFunction/Heartbeat — dpu-api,
+  including `CreateNetworkFunction` / `DeleteNetworkFunction`
+
+There is no protoc in this repo. Stubs are imported
+(`github.com/openshift/dpu-operator/dpu-api` with a replace to
+`opiproject/dpu-operator`, and the lifecycle module with a replace to
+the same nested-module commit the daemon uses).
+
+`CreateNetworkFunction` is a successful no-op. The daemon CNI path
+sends two MAC addresses; NVIDIA chain members are `DPUService` Helm
+charts from the mapping file. Returning `Empty` keeps the daemon
+healthy without imperative provisioning.
+
+PCI enumerator: vendor `0x15b3`, function `0` only. Serial from sysfs
+`serial`, else VPD keyword `SN`, else PCIe Device Serial Number in
+`config`. Lab commands: [docs/vsp.md](docs/vsp.md).
+
+Local mock (no BlueField):
 
 ```sh
 go run ./cmd/vsp --metrics-bind-address=0 \
@@ -53,141 +144,64 @@ go run ./cmd/vsp --metrics-bind-address=0 \
   --bfb-url=https://example.invalid/fw.bfb
 ```
 
-On a worker that has a BlueField, swap the mock for sysfs:
+gRPC only, no kubeconfig (macOS cannot bind `/var/run`):
 
 ```sh
-go run ./cmd/vsp --metrics-bind-address=0 --pci --node-name="$(hostname)"
+go run ./cmd/vsp --grpc-only --serial-number=MT25066004A1 \
+  --grpc-socket=/tmp/vendor-plugin.sock
+grpcurl -plaintext unix:///tmp/vendor-plugin.sock list
 ```
 
-That process also serves `LifeCycle.Init` and `GetDevices` on
-`/var/run/dpu-daemon/vendor-plugin/vendor-plugin.sock` (override with
-`--grpc-socket`). One listener multiplexes opi-api
-(`opi_api.lifecycle.v1alpha1`) — what the daemon `GrpcPlugin` dials
-today — and dpu-api `Vendor.*`. There is no protoc in this repo.
-
-Apply `config/samples/dataprocessingunit.yaml` (no serial annotation).
-The VSP patches `provisioning.dpu.nvidia.com/serial-number`; the
-translator then emits DPUDevice + DPUFlavor + BFB + DPU.
-
-See [docs/vsp.md](docs/vsp.md) for how this maps onto the Intel and
-Marvell VSPs in [`opiproject/dpu-operator`](https://github.com/opiproject/dpu-operator).
-
-## Description
-Companion adapter for the OPI DPU Operator. It does not own OPI CRDs.
-
-## Getting Started
-
-
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
-
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+On a worker with a BlueField (needs root, no cluster):
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/opi-nvidia-dpf-adapter:tag
+sudo ./vsp --pci --grpc-only --node-name="$(hostname)"
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+`--pci` without `--grpc-only` still calls `GetConfigOrDie`.
 
-**Install the CRDs into the cluster:**
+## Quick start
+
+Prerequisites: Go 1.26+, Docker, kubectl, a cluster that already has
+the OPI and DPF CRDs.
 
 ```sh
-make install
+# Translator against an existing cluster
+go run ./cmd/main.go --mapping-dir=config/mappings --metrics-bind-address=0
+
+# Sample DPU with no serial; the VSP stamps it
+kubectl apply -f config/samples/dataprocessingunit.yaml
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+Deploy from an image:
 
 ```sh
-make deploy IMG=<some-registry>/opi-nvidia-dpf-adapter:tag
+make docker-build docker-push IMG=<registry>/opi-nvidia-dpf-adapter:<tag>
+make deploy IMG=<registry>/opi-nvidia-dpf-adapter:<tag>
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+This adapter does not install OPI or DPF CRDs (`make install` is a
+no-op for APIs this repo does not own).
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+## Tests
 
-```sh
-kubectl apply -k config/samples/
-```
+| Command | What it proves |
+|---|---|
+| `go test ./pkg/mapping/` | CEL/JSONPath interpreter + real mapping files |
+| `go test ./pkg/discovery/` | PCI enumerator against mocked sysfs |
+| `go test ./pkg/vsp/` | GetDevices, opi-api handshake, NetworkFunction ack |
+| `go test ./internal/controller/` | Fake-client SFC chart vs image skip |
+| `make test-e2e` | Kind: deploy manager, metrics scrape (scaffold) |
 
->**NOTE**: Ensure that the samples has default values to test it out.
+`make test-e2e` does not yet apply a ServiceFunctionChain or install
+DPF CRDs. That is the next automation track.
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+## Status
 
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/opi-nvidia-dpf-adapter:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/opi-nvidia-dpf-adapter/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+Phase 0 software for the companion adapter is in place. Physical
+BlueField handshake (`lspci` / sysfs / daemon `Init`) waits on lab
+SSH. Helm `NetworkFunction.chart` is proposed upstream in
+[opiproject/dpu-operator#6](https://github.com/opiproject/dpu-operator/pull/6).
 
 ## License
 
@@ -204,4 +218,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
