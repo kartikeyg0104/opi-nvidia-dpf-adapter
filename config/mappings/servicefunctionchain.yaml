@@ -36,3 +36,7 @@ emit:
         required: true
       - to: spec.paused
         value: false
+      # DPF CEL: security.privileged must be set when deployInCluster is
+      # false (the default). NVIDIA DPUServices run on the DPU.
+      - to: spec.security.privileged
+        value: true
