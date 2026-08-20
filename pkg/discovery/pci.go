@@ -26,21 +26,27 @@ import (
 	"strings"
 )
 
-const (
-	defaultSysfsPCI = "/sys/bus/pci/devices"
+const defaultSysfsPCI = "/sys/bus/pci/devices"
 
-	// PCIe Device Serial Number extended capability ID.
+const (
+	productBlueField2 = "BlueField-2"
+	productBlueField3 = "BlueField-3"
+	productBlueField  = "BlueField"
+)
+
+// PCIe Device Serial Number extended capability ID and config-space offset.
+const (
 	pcieCapDSN      uint16 = 0x0003
-	pcieExtCapStart        = 0x100
+	pcieExtCapStart int    = 0x100
 )
 
 // Known BlueField device IDs (Mellanox/NVIDIA). Unknown 0x15b3 devices
-// still enumerate; ProductName falls back to "BlueField".
+// still enumerate; ProductName falls back to productBlueField.
 var blueFieldDeviceNames = map[uint16]string{
-	0xa2d2: "BlueField-2",
-	0xa2d6: "BlueField-2",
-	0xa2dc: "BlueField-3",
-	0xa2dd: "BlueField-3",
+	0xa2d2: productBlueField2,
+	0xa2d6: productBlueField2,
+	0xa2dc: productBlueField3,
+	0xa2dd: productBlueField3,
 }
 
 // PCIEnumerator scans sysfs for vendor 0x15b3 and reads the board serial,
@@ -85,7 +91,7 @@ func (p PCIEnumerator) Enumerate() ([]Device, error) {
 		}
 		name := blueFieldDeviceNames[deviceID]
 		if name == "" {
-			name = "BlueField"
+			name = productBlueField
 		}
 		devices = append(devices, Device{
 			PCIAddress:   addr,
