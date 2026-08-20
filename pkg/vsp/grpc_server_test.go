@@ -81,6 +81,21 @@ func TestOpiAPIGetDevicesUsesEnumerator(t *testing.T) {
 	waitStop(t, cancel, errc)
 }
 
+func TestNetworkFunctionAcknowledgesWithoutProvisioning(t *testing.T) {
+	ctx, conn, errc, cancel := startTestServer(t)
+	nf := pb.NewNetworkFunctionServiceClient(conn)
+	req := &pb.NFRequest{Input: "00:00:00:00:00:01", Output: "00:00:00:00:00:02"}
+
+	if _, err := nf.CreateNetworkFunction(ctx, req); err != nil {
+		t.Fatalf("CreateNetworkFunction: %v", err)
+	}
+	if _, err := nf.DeleteNetworkFunction(ctx, req); err != nil {
+		t.Fatalf("DeleteNetworkFunction: %v", err)
+	}
+
+	waitStop(t, cancel, errc)
+}
+
 func startTestServer(t *testing.T) (context.Context, *grpc.ClientConn, chan error, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
