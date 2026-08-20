@@ -96,6 +96,9 @@ var _ = Describe("ServiceFunctionChain translation", func() {
 			version, _, err := unstructured.NestedString(svc.Object, "spec", "helmChart", "source", "version")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(version).To(Equal(helmChartVersion))
+			priv, _, err := unstructured.NestedBool(svc.Object, "spec", "security", "privileged")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(priv).To(BeTrue())
 		})
 	})
 

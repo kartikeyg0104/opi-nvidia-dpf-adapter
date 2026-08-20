@@ -69,7 +69,8 @@ emit:
         cel: "source.metadata.name + '-device'"
       - to: spec.dpuFlavor
         cel: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('dpf-default-flavor')"
-      - to: spec.bfb.name
+      # DPU.spec.bfb is a string (the BFB CR name), not an object.
+      - to: spec.bfb
         cel: "source.metadata.?annotations['dpu.nvidia.com/bfb'].orValue('bf-bundle')"
       - to: spec.serialNumber
         cel: "source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue('')"
