@@ -63,8 +63,9 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
+# Kind e2e: builds the image (manager + /vsp), loads it, installs vendored
+# OPI/DPF CRDs, deploys the translator and mock VSP, then asserts DPUDevice
+# and DPUService objects appear. Override the cluster name with KIND_CLUSTER.
 # kubectl kuberc is disabled by default for test isolation; enable with:
 # - KUBECTL_KUBERC=true
 # CertManager is installed by default; skip with:
@@ -121,7 +122,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
+docker-build: ## Build docker image with the manager and VSP binaries.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
 .PHONY: docker-push
@@ -149,6 +150,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
+	cd config/vsp && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
 
 ##@ Deployment
@@ -170,6 +172,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
+	cd config/vsp && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 
 .PHONY: undeploy

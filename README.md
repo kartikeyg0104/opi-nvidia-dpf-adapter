@@ -191,10 +191,9 @@ no-op for APIs this repo does not own).
 | `go test ./pkg/discovery/` | PCI enumerator against mocked sysfs |
 | `go test ./pkg/vsp/` | GetDevices, opi-api handshake, NetworkFunction ack |
 | `go test ./internal/controller/` | Fake-client SFC chart vs image skip |
-| `make test-e2e` | Kind: deploy manager, metrics scrape (scaffold) |
+| `make test-e2e` | Kind: CRDs, mock VSP, DPU→DPUDevice, SFC→DPUService |
 
-`make test-e2e` does not yet apply a ServiceFunctionChain or install
-DPF CRDs. That is the next automation track.
+`make test-e2e` creates a kind cluster, installs the vendored OPI and DPF CRDs from `test/e2e/crds/`, deploys the translator plus a mock VSP (`--serial-number` / `--bfb-url` from env), applies a `DataProcessingUnit` and a Helm-chart `ServiceFunctionChain`, and waits until `DPUDevice` and `DPUService` exist.
 
 ## Status
 

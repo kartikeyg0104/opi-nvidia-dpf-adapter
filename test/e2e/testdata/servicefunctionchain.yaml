@@ -1,0 +1,14 @@
+apiVersion: config.openshift.io/v1
+kind: ServiceFunctionChain
+metadata:
+  name: e2e-hbn
+  namespace: default
+spec:
+  networkFunctions:
+  - name: skip-image
+    image: nginx:latest
+  - name: hbn
+    chart:
+      name: hbn
+      repository: https://helm.ngc.nvidia.com/nvidia/doca
+      version: v25.10.1
