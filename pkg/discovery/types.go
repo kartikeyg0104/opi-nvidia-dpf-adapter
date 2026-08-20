@@ -27,7 +27,7 @@ limitations under the License.
 // FieldMapping YAML can emit DPF objects with a real serialNumber.
 //
 // Enumerator is the Intel-shaped seam. MockEnumerator is for kind/local
-// e2e. A sysfs PCI enumerator plugs in later without changing the
+// e2e. PCIEnumerator scans sysfs for vendor 0x15b3 without changing the
 // annotator or the mapping YAML.
 package discovery
 

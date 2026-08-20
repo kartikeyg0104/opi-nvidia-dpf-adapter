@@ -2,7 +2,8 @@
 
 NVIDIA companion operator that translates OPI objects
 (`DataProcessingUnit`, `ServiceFunctionChain` from
-[`openshift/dpu-operator`](https://github.com/openshift/dpu-operator))
+[`opiproject/dpu-operator`](https://github.com/opiproject/dpu-operator);
+OpenShift downstream is [`openshift/dpu-operator`](https://github.com/openshift/dpu-operator))
 into DPF objects (`DPU`, `DPUService`, … from
 [`NVIDIA/doca-platform`](https://github.com/NVIDIA/doca-platform)).
 
@@ -52,12 +53,18 @@ go run ./cmd/vsp --metrics-bind-address=0 \
   --bfb-url=https://example.invalid/fw.bfb
 ```
 
+On a worker that has a BlueField, swap the mock for sysfs:
+
+```sh
+go run ./cmd/vsp --metrics-bind-address=0 --pci --node-name="$(hostname)"
+```
+
 Apply `config/samples/dataprocessingunit.yaml` (no serial annotation).
 The VSP patches `provisioning.dpu.nvidia.com/serial-number`; the
 translator then emits DPUDevice + DPUFlavor + BFB + DPU.
 
 See [docs/vsp.md](docs/vsp.md) for how this maps onto the Intel and
-Marvell VSPs in `openshift/dpu-operator`.
+Marvell VSPs in [`opiproject/dpu-operator`](https://github.com/opiproject/dpu-operator).
 
 ## Description
 Companion adapter for the OPI DPU Operator. It does not own OPI CRDs.
