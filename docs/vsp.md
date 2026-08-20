@@ -30,6 +30,23 @@
 #
 # The same process serves LifeCycle/GetDevices on
 # /var/run/dpu-daemon/vendor-plugin/vendor-plugin.sock so the in-tree
-# dpu-operator daemon can dial it. Stubs come from
-# github.com/openshift/dpu-operator/dpu-api (the Go module path still
-# used by opiproject/dpu-operator). This repo does not run protoc.
+# dpu-operator daemon can dial it.
+#
+# One unix socket multiplexes:
+#   - opi_api.lifecycle.v1alpha1.LifeCycleService / DeviceService
+#     (what internal/daemon/plugin GrpcPlugin currently dials)
+#   - Vendor.LifeCycleService / DeviceService / NetworkFunctionService
+#     (dpu-api)
+#
+# Stubs are imported; this repo does not run protoc. The lifecycle Go
+# module path is github.com/opiproject/opi-api/v1/gen/go/lifecycle with a
+# replace to github.com/bn222/opi-api — the same commit the daemon uses.
+#
+# Local socket check without a cluster (macOS cannot bind /var/run):
+#
+#   go run ./cmd/vsp --grpc-only --serial-number=MT25066004A1 \
+#     --grpc-socket=/tmp/vendor-plugin.sock
+#   grpcurl -plaintext unix:///tmp/vendor-plugin.sock list
+#   grpcurl -plaintext unix:///tmp/vendor-plugin.sock \
+#     opi_api.lifecycle.v1alpha1.DeviceService/GetDevices
+

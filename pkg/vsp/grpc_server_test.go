@@ -25,13 +25,64 @@ import (
 	"time"
 
 	pb "github.com/openshift/dpu-operator/dpu-api/gen"
+	opi "github.com/opiproject/opi-api/v1/gen/go/lifecycle/v1alpha1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/discovery"
 )
 
 func TestGetDevicesUsesEnumerator(t *testing.T) {
+	ctx, conn, errc, cancel := startTestServer(t)
+
+	got, err := pb.NewDeviceServiceClient(conn).GetDevices(ctx, &pb.Empty{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, ok := got.Devices["0000:03:00.0"]
+	if !ok {
+		t.Fatalf("devices=%v", got.Devices)
+	}
+	assertBlueField(t, dev.GetID(), dev.GetHealth())
+
+	ip, err := pb.NewLifeCycleServiceClient(conn).Init(ctx, &pb.InitRequest{DpuMode: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip.GetIp() != defaultIP || ip.GetPort() != defaultPort {
+		t.Fatalf("%+v", ip)
+	}
+
+	waitStop(t, cancel, errc)
+}
+
+func TestOpiAPIGetDevicesUsesEnumerator(t *testing.T) {
+	ctx, conn, errc, cancel := startTestServer(t)
+
+	got, err := opi.NewDeviceServiceClient(conn).GetDevices(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, ok := got.Devices["0000:03:00.0"]
+	if !ok {
+		t.Fatalf("devices=%v", got.Devices)
+	}
+	assertBlueField(t, dev.GetID(), dev.GetHealth())
+
+	ip, err := opi.NewLifeCycleServiceClient(conn).Init(ctx, &opi.InitRequest{DpuMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip.GetIp() != defaultIP || ip.GetPort() != defaultPort {
+		t.Fatalf("%+v", ip)
+	}
+
+	waitStop(t, cancel, errc)
+}
+
+func startTestServer(t *testing.T) (context.Context, *grpc.ClientConn, chan error, context.CancelFunc) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -48,27 +99,18 @@ func TestGetDevicesUsesEnumerator(t *testing.T) {
 
 	conn := waitDial(t, sock)
 	t.Cleanup(func() { _ = conn.Close() })
+	return ctx, conn, errc, cancel
+}
 
-	got, err := pb.NewDeviceServiceClient(conn).GetDevices(ctx, &pb.Empty{})
-	if err != nil {
-		t.Fatal(err)
+func assertBlueField(t *testing.T, id, health string) {
+	t.Helper()
+	if id != "MT25066004A1" || health != healthOK {
+		t.Fatalf("id=%s health=%s", id, health)
 	}
-	dev, ok := got.Devices["0000:03:00.0"]
-	if !ok {
-		t.Fatalf("devices=%v", got.Devices)
-	}
-	if dev.ID != "MT25066004A1" || dev.Health != healthOK {
-		t.Fatalf("%+v", dev)
-	}
+}
 
-	ip, err := pb.NewLifeCycleServiceClient(conn).Init(ctx, &pb.InitRequest{DpuMode: false})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ip.GetIp() != defaultIP || ip.GetPort() != defaultPort {
-		t.Fatalf("%+v", ip)
-	}
-
+func waitStop(t *testing.T, cancel context.CancelFunc, errc chan error) {
+	t.Helper()
 	cancel()
 	select {
 	case <-errc:

@@ -17,9 +17,14 @@ limitations under the License.
 // Package vsp is the NVIDIA Vendor-Specific Plugin gRPC surface.
 //
 // The in-tree dpu-operator daemon dials a unix socket and expects
-// LifeCycle.Init plus DeviceService.GetDevices. Generated stubs come from
-// github.com/openshift/dpu-operator/dpu-api (the module path still used by
-// opiproject/dpu-operator). This repo does not run protoc.
+// LifeCycle.Init plus DeviceService.GetDevices. One listener multiplexes:
+//
+//   - opi-api lifecycle (opi_api.lifecycle.v1alpha1.*) — what GrpcPlugin
+//     currently dials for Init/GetDevices
+//   - dpu-api Vendor.* — NetworkFunction plus the same handshake for the
+//     vendor-specific path
+//
+// Generated stubs are imported; this repo does not run protoc.
 package vsp
 
 import (
@@ -32,7 +37,9 @@ import (
 
 	"github.com/go-logr/logr"
 	pb "github.com/openshift/dpu-operator/dpu-api/gen"
+	opi "github.com/opiproject/opi-api/v1/gen/go/lifecycle/v1alpha1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/discovery"
@@ -147,6 +154,10 @@ func (s *Server) Start(ctx context.Context) error {
 	pb.RegisterDeviceServiceServer(s.grpcServer, s)
 	pb.RegisterNetworkFunctionServiceServer(s.grpcServer, s)
 	pb.RegisterHeartbeatServiceServer(s.grpcServer, s)
+	hs := &opiHandshake{s: s}
+	opi.RegisterLifeCycleServiceServer(s.grpcServer, hs)
+	opi.RegisterDeviceServiceServer(s.grpcServer, hs)
+	reflection.Register(s.grpcServer)
 
 	s.Log.Info("serving vendor plugin", "socket", s.SocketPath)
 
