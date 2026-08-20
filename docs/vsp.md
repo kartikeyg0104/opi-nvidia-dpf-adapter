@@ -27,8 +27,9 @@
 #   xxd /sys/bus/pci/devices/<bdf>/vpd      # SN keyword
 #
 #   go run ./cmd/vsp --metrics-bind-address=0 --pci --node-name="$NODE"
-
 #
-# Full LifeCycle/DeviceService/CreateNetworkFunction gRPC, matching
-# Intel/Marvell so dpu-operator can launch this VSP as a vendor pod, is
-# a follow-up. Do not put that gRPC server in-tree in dpu-operator.
+# The same process serves LifeCycle/GetDevices on
+# /var/run/dpu-daemon/vendor-plugin/vendor-plugin.sock so the in-tree
+# dpu-operator daemon can dial it. Stubs come from
+# github.com/openshift/dpu-operator/dpu-api (the Go module path still
+# used by opiproject/dpu-operator). This repo does not run protoc.
