@@ -50,7 +50,7 @@ func TestPCIEnumeratorFindsBlueFieldFromSerialFile(t *testing.T) {
 	if d.SerialNumber != "MT25066004A1" {
 		t.Errorf("serial=%s", d.SerialNumber)
 	}
-	if d.ProductName != "BlueField-3" {
+	if d.ProductName != productBlueField3 {
 		t.Errorf("product=%s", d.ProductName)
 	}
 	if d.VendorID != NVIDIAVendorID || d.DeviceID != 0xa2dc {
@@ -71,7 +71,7 @@ func TestPCIEnumeratorReadsVPDSerial(t *testing.T) {
 	if len(got) != 1 || got[0].SerialNumber != "MT2119X00001" {
 		t.Fatalf("%+v", got)
 	}
-	if got[0].ProductName != "BlueField-2" {
+	if got[0].ProductName != productBlueField2 {
 		t.Errorf("product=%s", got[0].ProductName)
 	}
 }
@@ -142,7 +142,8 @@ func writePCIDevice(t *testing.T, root, addr string, vendor, device uint16, file
 
 func buildVPD(serial string) []byte {
 	kw := append([]byte{'S', 'N', byte(len(serial))}, serial...)
-	hdr := []byte{0x90, byte(len(kw)), 0x00}
-	out := append(hdr, kw...)
+	out := make([]byte, 0, 3+len(kw)+1)
+	out = append(out, 0x90, byte(len(kw)), 0x00)
+	out = append(out, kw...)
 	return append(out, 0x78)
 }

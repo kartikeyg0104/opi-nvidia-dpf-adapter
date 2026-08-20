@@ -26,7 +26,13 @@
 #   cat /sys/bus/pci/devices/<bdf>/serial   # if present
 #   xxd /sys/bus/pci/devices/<bdf>/vpd      # SN keyword
 #
-#   go run ./cmd/vsp --metrics-bind-address=0 --pci --node-name="$NODE"
+#   # Day 1 (no cluster): bind the real daemon socket and scan PCI.
+#   # --pci without --grpc-only calls GetConfigOrDie and needs kubeconfig.
+#   sudo ./vsp --pci --grpc-only --node-name="$(hostname)"
+#
+#   # Only function 0 is enumerated. serial is often missing; VPD SN or
+#   # the PCIe DSN in config is the fallback. Root is required for
+#   # /var/run and usually for config-space reads.
 #
 # The same process serves LifeCycle/GetDevices on
 # /var/run/dpu-daemon/vendor-plugin/vendor-plugin.sock so the in-tree
