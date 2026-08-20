@@ -164,6 +164,20 @@ func TestLoadRealMappings(t *testing.T) {
 	if len(objs) != 4 {
 		t.Fatalf("DataProcessingUnit should emit 4 DPF objects, got %d", len(objs))
 	}
+	var sawDPU bool
+	for _, o := range objs {
+		if o.GetKind() != "DPU" {
+			continue
+		}
+		sawDPU = true
+		// DPF DPU.spec.bfb is the BFB CR name (string), not {name: ...}.
+		if bfb := nested(o.Object, "spec", "bfb"); bfb != "bf-bundle" {
+			t.Errorf("spec.bfb=%#v, want string bf-bundle", bfb)
+		}
+	}
+	if !sawDPU {
+		t.Fatal("missing emitted DPU")
+	}
 }
 
 func TestLoadDir(t *testing.T) {
