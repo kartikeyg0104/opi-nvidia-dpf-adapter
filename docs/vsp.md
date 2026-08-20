@@ -44,6 +44,12 @@
 #   - Vendor.LifeCycleService / DeviceService / NetworkFunctionService
 #     (dpu-api)
 #
+# Vendor.NetworkFunctionService Create/Delete are acknowledgements. The
+# daemon DpuSideManager calls them with two MAC addresses after CNI add
+# on a network-function pod. NVIDIA chain members are DPUService Helm
+# charts from config/mappings/servicefunctionchain.yaml; returning Empty
+# keeps the daemon healthy without imperative VSP provisioning.
+#
 # Stubs are imported; this repo does not run protoc. The lifecycle Go
 # module path is github.com/opiproject/opi-api/v1/gen/go/lifecycle with a
 # replace to github.com/bn222/opi-api — the same commit the daemon uses.
