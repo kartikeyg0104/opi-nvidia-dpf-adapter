@@ -26,9 +26,33 @@
 #   cat /sys/bus/pci/devices/<bdf>/serial   # if present
 #   xxd /sys/bus/pci/devices/<bdf>/vpd      # SN keyword
 #
-#   go run ./cmd/vsp --metrics-bind-address=0 --pci --node-name="$NODE"
-
+#   # Day 1 (no cluster): bind the real daemon socket and scan PCI.
+#   # --pci without --grpc-only calls GetConfigOrDie and needs kubeconfig.
+#   sudo ./vsp --pci --grpc-only --node-name="$(hostname)"
 #
-# Full LifeCycle/DeviceService/CreateNetworkFunction gRPC, matching
-# Intel/Marvell so dpu-operator can launch this VSP as a vendor pod, is
-# a follow-up. Do not put that gRPC server in-tree in dpu-operator.
+#   # Only function 0 is enumerated. serial is often missing; VPD SN or
+#   # the PCIe DSN in config is the fallback. Root is required for
+#   # /var/run and usually for config-space reads.
+#
+# The same process serves LifeCycle/GetDevices on
+# /var/run/dpu-daemon/vendor-plugin/vendor-plugin.sock so the in-tree
+# dpu-operator daemon can dial it.
+#
+# One unix socket multiplexes:
+#   - opi_api.lifecycle.v1alpha1.LifeCycleService / DeviceService
+#     (what internal/daemon/plugin GrpcPlugin currently dials)
+#   - Vendor.LifeCycleService / DeviceService / NetworkFunctionService
+#     (dpu-api)
+#
+# Stubs are imported; this repo does not run protoc. The lifecycle Go
+# module path is github.com/opiproject/opi-api/v1/gen/go/lifecycle with a
+# replace to github.com/bn222/opi-api — the same commit the daemon uses.
+#
+# Local socket check without a cluster (macOS cannot bind /var/run):
+#
+#   go run ./cmd/vsp --grpc-only --serial-number=MT25066004A1 \
+#     --grpc-socket=/tmp/vendor-plugin.sock
+#   grpcurl -plaintext unix:///tmp/vendor-plugin.sock list
+#   grpcurl -plaintext unix:///tmp/vendor-plugin.sock \
+#     opi_api.lifecycle.v1alpha1.DeviceService/GetDevices
+

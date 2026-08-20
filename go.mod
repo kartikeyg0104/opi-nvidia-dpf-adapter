@@ -3,9 +3,14 @@ module github.com/kartikeyg0104/opi-nvidia-dpf-adapter
 go 1.26.0
 
 require (
+	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.26.0
 	github.com/onsi/ginkgo/v2 v2.27.4
 	github.com/onsi/gomega v1.39.0
+	github.com/openshift/dpu-operator/dpu-api v0.0.0-20260428194247-3092bcbe6a03
+	github.com/opiproject/opi-api/v1/gen/go/lifecycle v0.0.0-20251222163009-3317b3692163
+	google.golang.org/grpc v1.79.3
+	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	k8s.io/apimachinery v0.36.0
 	k8s.io/client-go v0.36.0
 	sigs.k8s.io/controller-runtime v0.24.1
@@ -26,7 +31,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
-	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
@@ -80,8 +84,6 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
-	google.golang.org/grpc v1.79.3 // indirect
-	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -97,4 +99,11 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
+)
+
+replace (
+	github.com/openshift/dpu-operator/dpu-api => github.com/opiproject/dpu-operator/dpu-api v0.0.0-20260428194247-3092bcbe6a03
+	// Nested lifecycle module still declares the opiproject path; the
+	// generated stubs the daemon imports live on bn222 at this commit.
+	github.com/opiproject/opi-api/v1/gen/go/lifecycle => github.com/bn222/opi-api/v1/gen/go/lifecycle v0.0.0-20251222163009-3317b3692163
 )

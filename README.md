@@ -59,6 +59,12 @@ On a worker that has a BlueField, swap the mock for sysfs:
 go run ./cmd/vsp --metrics-bind-address=0 --pci --node-name="$(hostname)"
 ```
 
+That process also serves `LifeCycle.Init` and `GetDevices` on
+`/var/run/dpu-daemon/vendor-plugin/vendor-plugin.sock` (override with
+`--grpc-socket`). One listener multiplexes opi-api
+(`opi_api.lifecycle.v1alpha1`) — what the daemon `GrpcPlugin` dials
+today — and dpu-api `Vendor.*`. There is no protoc in this repo.
+
 Apply `config/samples/dataprocessingunit.yaml` (no serial annotation).
 The VSP patches `provisioning.dpu.nvidia.com/serial-number`; the
 translator then emits DPUDevice + DPUFlavor + BFB + DPU.
