@@ -11,10 +11,23 @@
 #   provisioning.dpu.nvidia.com/serial-number
 #   dpu.nvidia.com/bfb-url
 #
-# cmd/vsp is the missing link. It enumerates hardware (mock today, PCI
-# sysfs next) and patches those annotations. The FieldMapping YAML then
-# emits DPF objects with a real serialNumber — no Go if/else in the
-# translator.
+# cmd/vsp is the missing link. It enumerates hardware and patches those
+# annotations. MockEnumerator is for kind. PCIEnumerator scans
+# /sys/bus/pci/devices for vendor 0x15b3 (function 0) and reads serial
+# from sysfs `serial`, VPD keyword SN, or the PCIe Device Serial Number
+# extended capability. The FieldMapping YAML then emits DPF objects with
+# a real serialNumber — no Go if/else in the translator.
+#
+# On a worker with a BlueField:
+#
+#   lspci -nn | grep 15b3
+#   ls /sys/bus/pci/devices/<bdf>/
+#   cat /sys/bus/pci/devices/<bdf>/vendor
+#   cat /sys/bus/pci/devices/<bdf>/serial   # if present
+#   xxd /sys/bus/pci/devices/<bdf>/vpd      # SN keyword
+#
+#   go run ./cmd/vsp --metrics-bind-address=0 --pci --node-name="$NODE"
+
 #
 # Full LifeCycle/DeviceService/CreateNetworkFunction gRPC, matching
 # Intel/Marvell so dpu-operator can launch this VSP as a vendor pod, is
