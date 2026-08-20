@@ -38,6 +38,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/discovery"
+	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/vsp"
 )
 
 var (
@@ -61,6 +62,7 @@ func main() {
 		flavor       string
 		bfbName      string
 		usePCI       bool
+		grpcSocket   string
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "metrics listen address; 0 disables")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8082", "health probe listen address")
@@ -74,6 +76,8 @@ func main() {
 	flag.StringVar(&flavor, "flavor", "", "optional dpu.nvidia.com/flavor annotation")
 	flag.StringVar(&bfbName, "bfb-name", "", "optional dpu.nvidia.com/bfb annotation")
 	flag.BoolVar(&usePCI, "pci", false, "scan sysfs for vendor 0x15b3 instead of using --serial-number")
+	flag.StringVar(&grpcSocket, "grpc-socket", vsp.DefaultSocket,
+		"unix socket the dpu-operator daemon dials")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -117,6 +121,11 @@ func main() {
 	}
 	if err := ann.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create hardware-discovery controller")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(vsp.NewServer(enumerator, grpcSocket)); err != nil {
+		setupLog.Error(err, "unable to add vendor plugin gRPC server")
 		os.Exit(1)
 	}
 
