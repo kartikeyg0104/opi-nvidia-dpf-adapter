@@ -20,7 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -110,7 +109,7 @@ func TestFinalizerAndCleanup(t *testing.T) {
 		t.Errorf("annSource=%q, want ServiceFunctionChain:opi/xns-chain", v)
 	}
 
-	if err := r.cleanupAnnotatedChildren(ctx, logr.Discard(), got); err != nil {
+	if err := r.cleanupAnnotatedChildren(ctx, got); err != nil {
 		t.Fatal(err)
 	}
 	gone := &unstructured.Unstructured{}
