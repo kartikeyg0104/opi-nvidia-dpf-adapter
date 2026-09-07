@@ -119,6 +119,12 @@ var _ = BeforeSuite(func() {
 	for _, s := range loaded {
 		specs[s.Metadata.Name] = s
 	}
+	// Conformance-only fixtures (e.g. the cross-namespace cleanup mapping).
+	fixtures, err := mapping.LoadDir("testdata")
+	Expect(err).NotTo(HaveOccurred())
+	for _, s := range fixtures {
+		specs[s.Metadata.Name] = s
+	}
 })
 
 var _ = AfterSuite(func() {

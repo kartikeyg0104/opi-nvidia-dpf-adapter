@@ -1,0 +1,41 @@
+# Conformance-only fixture: forces a CROSS-NAMESPACE child by emitting the
+# DPUService into a fixed namespace. When the source ServiceFunctionChain lives
+# in a different namespace, SetControllerReference is illegal (namespaced owner,
+# different-namespace child), so the child becomes annotation-tracked and must
+# be reclaimed by the cleanup finalizer rather than Kubernetes GC. The shipped
+# servicefunctionchain mapping keeps children in the source namespace and never
+# hits this path; this fixture exists purely to exercise Track B cleanup.
+apiVersion: translation.opi.nvidia.com/v1alpha1
+kind: FieldMapping
+metadata:
+  name: servicefunctionchain-xns
+source:
+  group: config.openshift.io
+  version: v1
+  kind: ServiceFunctionChain
+emit:
+  - target:
+      group: svc.dpu.nvidia.com
+      version: v1alpha1
+      kind: DPUService
+    forEach:
+      in: spec.networkFunctions
+    when: "'chart' in item"
+    name:
+      cel: "item.name"
+    namespace:
+      value: dpf-operator-system
+    fields:
+      - to: spec.serviceID
+        from: item.name
+        required: true
+      - to: spec.helmChart.source.repoURL
+        cel: "item.chart.repository"
+        required: true
+      - to: spec.helmChart.source.version
+        cel: "item.chart.version"
+        required: true
+      - to: spec.paused
+        value: false
+      - to: spec.security.privileged
+        value: false

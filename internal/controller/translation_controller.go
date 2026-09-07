@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -41,6 +42,16 @@ const fieldOwner = "opi-nvidia-dpf-adapter"
 // reference (namespaced owner of a cluster-scoped or cross-namespace child).
 const annSource = "translation.opi.nvidia.com/source"
 
+// cleanupFinalizer lets the controller delete annotation-tracked children that
+// Kubernetes garbage collection cannot reach before the source disappears.
+const cleanupFinalizer = "translation.opi.nvidia.com/cleanup"
+
+// Exported for tests and conformance assertions.
+const (
+	AnnSource        = annSource
+	CleanupFinalizer = cleanupFinalizer
+)
+
 // TranslationReconciler watches the OPI GVK named in a FieldMapping and
 // applies that mapping to produce DPF objects. Kind-specific logic lives in
 // config/mappings/*.yaml, not in this file.
@@ -50,14 +61,14 @@ type TranslationReconciler struct {
 	Spec   *mapping.Spec
 }
 
-// +kubebuilder:rbac:groups=config.openshift.io,resources=dataprocessingunits,verbs=get;list;watch
+// +kubebuilder:rbac:groups=config.openshift.io,resources=dataprocessingunits,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=dataprocessingunits/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=dataprocessingunits/finalizers,verbs=update
-// +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains,verbs=get;list;watch
+// +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains/finalizers,verbs=update
-// +kubebuilder:rbac:groups=provisioning.dpu.nvidia.com,resources=dpus;dpudevices;dpuflavors;bfbs,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=svc.dpu.nvidia.com,resources=dpuservices,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=provisioning.dpu.nvidia.com,resources=dpus;dpudevices;dpuflavors;bfbs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=svc.dpu.nvidia.com,resources=dpuservices,verbs=get;list;watch;create;update;patch;delete
 
 func (r *TranslationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("mapping", r.Spec.Metadata.Name)
@@ -69,6 +80,20 @@ func (r *TranslationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	if ts := src.GetDeletionTimestamp(); ts != nil && !ts.IsZero() {
+		return r.reconcileDelete(ctx, log, src)
+	}
+
+	// Ensure the cleanup finalizer before emitting anything, so a delete that
+	// races the first apply can still reclaim annotation-tracked children.
+	// Fall through to apply in the same pass so a single reconcile converges.
+	if !controllerutil.ContainsFinalizer(src, cleanupFinalizer) {
+		controllerutil.AddFinalizer(src, cleanupFinalizer)
+		if err := r.Update(ctx, src); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	emitted, err := mapping.Apply(r.Spec, src.Object)
@@ -90,6 +115,45 @@ func (r *TranslationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
+// reconcileDelete deletes annotation-tracked children (owner-ref children are
+// left to Kubernetes GC) and then drops the finalizer so the source can go.
+func (r *TranslationReconciler) reconcileDelete(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(src, cleanupFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	if err := r.cleanupAnnotatedChildren(ctx, log, src); err != nil {
+		return ctrl.Result{}, err
+	}
+	controllerutil.RemoveFinalizer(src, cleanupFinalizer)
+	if err := r.Update(ctx, src); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// cleanupAnnotatedChildren deletes every labeled child whose provenance
+// annotation names this source. These are the children that could not receive
+// an owner reference (cross-namespace / cluster-vs-namespaced), so GC will not
+// reclaim them; owner-ref children carry no annotation and are skipped.
+func (r *TranslationReconciler) cleanupAnnotatedChildren(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) error {
+	want := annSourceValue(src)
+	objs, err := r.listChildObjects(ctx, src)
+	if err != nil {
+		return err
+	}
+	for i := range objs {
+		child := &objs[i]
+		if child.GetAnnotations()[annSource] != want {
+			continue
+		}
+		if err := r.Delete(ctx, child); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("delete annotated child %s/%s: %w", child.GetKind(), child.GetName(), err)
+		}
+		log.Info("deleted annotation-tracked child", "kind", child.GetKind(), "name", child.GetName(), "namespace", child.GetNamespace())
+	}
+	return nil
+}
+
 func (r *TranslationReconciler) applyOne(ctx context.Context, src, obj *unstructured.Unstructured) error {
 	stampOwner(src, obj, r.Scheme)
 
@@ -108,9 +172,13 @@ func (r *TranslationReconciler) mirrorStatus(ctx context.Context, src *unstructu
 	if r.Spec.Status == nil {
 		return nil
 	}
-	children, err := r.listChildren(ctx, src)
+	objs, err := r.listChildObjects(ctx, src)
 	if err != nil {
 		return err
+	}
+	children := make([]any, 0, len(objs))
+	for i := range objs {
+		children = append(children, objs[i].Object)
 	}
 	desired, err := mapping.ApplyStatus(r.Spec, src.Object, children)
 	if err != nil {
@@ -125,17 +193,17 @@ func (r *TranslationReconciler) mirrorStatus(ctx context.Context, src *unstructu
 	return r.Status().Update(ctx, src)
 }
 
-// listChildren returns every emitted child of src, located by the translation
-// labels across each distinct target GVK the mapping emits. Target CRDs that
-// are not installed are skipped rather than failing the roll-up.
-func (r *TranslationReconciler) listChildren(ctx context.Context, src *unstructured.Unstructured) ([]any, error) {
+// listChildObjects returns every emitted child of src, located by the
+// translation labels across each distinct target GVK. Target CRDs that are not
+// installed are skipped rather than failing.
+func (r *TranslationReconciler) listChildObjects(ctx context.Context, src *unstructured.Unstructured) ([]unstructured.Unstructured, error) {
 	sel := client.MatchingLabels{
 		mapping.LabelMapping:    r.Spec.Metadata.Name,
 		mapping.LabelSourceKind: r.Spec.Source.Kind,
 		mapping.LabelSourceName: src.GetName(),
 	}
 	seen := map[schema.GroupVersionKind]bool{}
-	var children []any
+	var out []unstructured.Unstructured
 	for _, e := range r.Spec.Emit {
 		gvk := e.Target.GVK()
 		if seen[gvk] {
@@ -153,11 +221,9 @@ func (r *TranslationReconciler) listChildren(ctx context.Context, src *unstructu
 			}
 			return nil, err
 		}
-		for i := range list.Items {
-			children = append(children, list.Items[i].Object)
-		}
+		out = append(out, list.Items...)
 	}
-	return children, nil
+	return out, nil
 }
 
 // applyStatus merges desired (the .status subtree from ApplyStatus) into src,
@@ -256,7 +322,8 @@ func mergeConditions(existing, desired []any) ([]any, bool) {
 //
 // Cluster-scoped owners (DataProcessingUnit) may own namespaced children.
 // Namespaced owners may only own children in the same namespace; in that
-// illegal case we keep a provenance annotation instead of a dangling ref.
+// illegal case we keep a provenance annotation instead of a dangling ref, and
+// the cleanup finalizer deletes such children on source deletion.
 func stampOwner(src, obj *unstructured.Unstructured, scheme *runtime.Scheme) {
 	if err := controllerutil.SetControllerReference(src, obj, scheme); err == nil {
 		return
@@ -265,12 +332,18 @@ func stampOwner(src, obj *unstructured.Unstructured, scheme *runtime.Scheme) {
 	if ann == nil {
 		ann = map[string]string{}
 	}
+	ann[annSource] = annSourceValue(src)
+	obj.SetAnnotations(ann)
+}
+
+// annSourceValue is the provenance string stamped on annotation-tracked
+// children: "<Kind>:<namespace>/<name>" (namespace omitted when cluster-scoped).
+func annSourceValue(src *unstructured.Unstructured) string {
 	key := src.GetName()
 	if ns := src.GetNamespace(); ns != "" {
 		key = ns + "/" + key
 	}
-	ann[annSource] = src.GetKind() + ":" + key
-	obj.SetAnnotations(ann)
+	return src.GetKind() + ":" + key
 }
 
 // SetupWithManager watches the mapping's source GVK and owns each distinct DPF

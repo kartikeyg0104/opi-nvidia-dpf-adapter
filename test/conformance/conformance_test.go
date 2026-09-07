@@ -251,3 +251,63 @@ func conditionByType(obj *unstructured.Unstructured, condType string) map[string
 	}
 	return nil
 }
+
+var _ = Describe("Cleanup on delete (annotation-tracked cross-namespace children)", func() {
+	It("deletes annotation-tracked children via the finalizer when the source is removed", func() {
+		ensureNamespace("opi")
+		ensureNamespace(dpfNS)
+
+		src := fromYAML(`
+apiVersion: config.openshift.io/v1
+kind: ServiceFunctionChain
+metadata:
+  name: xns-chain
+  namespace: opi
+spec:
+  networkFunctions:
+  - name: hbn
+    chart:
+      repository: https://helm.ngc.nvidia.com/nvidia/doca
+      name: hbn
+      version: v25.10.1
+`)
+		Expect(k8sClient.Create(ctx, src)).To(Succeed())
+		srcNN := types.NamespacedName{Name: "xns-chain", Namespace: "opi"}
+		childNN := types.NamespacedName{Name: "hbn", Namespace: dpfNS}
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, src)
+			child := &unstructured.Unstructured{}
+			child.SetGroupVersionKind(svcGVK)
+			_ = k8sClient.Delete(ctx, child)
+		})
+
+		By("reconciling: child lands cross-namespace, annotation-tracked, source gets the finalizer")
+		reconcileOnce("servicefunctionchain-xns", srcNN)
+
+		child := getObject(svcGVK, childNN)
+		Expect(child.GetOwnerReferences()).To(BeEmpty(),
+			"cross-namespace child must NOT carry an owner reference (GC cannot reclaim it)")
+		Expect(child.GetAnnotations()).To(
+			HaveKeyWithValue(controller.AnnSource, "ServiceFunctionChain:opi/xns-chain"))
+
+		stored := getObject(sfcGVK, srcNN)
+		Expect(stored.GetFinalizers()).To(ContainElement(controller.CleanupFinalizer),
+			"source must carry the cleanup finalizer so the child can be reclaimed")
+
+		By("deleting the source and reconciling the deletion")
+		Expect(k8sClient.Delete(ctx, stored)).To(Succeed())
+		reconcileOnce("servicefunctionchain-xns", srcNN)
+
+		By("the annotation-tracked child is gone")
+		gotChild := &unstructured.Unstructured{}
+		gotChild.SetGroupVersionKind(svcGVK)
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, childNN, gotChild))).To(BeTrue(),
+			"annotation-tracked child should be deleted by the finalizer cleanup")
+
+		By("the source finalizer is removed and the source is gone")
+		gotSrc := &unstructured.Unstructured{}
+		gotSrc.SetGroupVersionKind(sfcGVK)
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, srcNN, gotSrc))).To(BeTrue(),
+			"source should be deleted once the cleanup finalizer is removed")
+	})
+})
