@@ -223,3 +223,102 @@ func nested(obj map[string]any, keys ...string) any {
 	}
 	return cur
 }
+
+func statusSpec() *Spec {
+	return &Spec{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "sfc"},
+		Source:     ObjectRef{Group: "config.openshift.io", Version: "v1", Kind: "ServiceFunctionChain"},
+		Emit: []Emit{{
+			Target: ObjectRef{Group: "svc.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPUService"},
+			Name:   Value{From: "metadata.name"},
+			Fields: []Field{{To: "spec.paused", Value: false}},
+		}},
+		Status: &StatusMapping{
+			Fields: []Field{{To: "status.observedServices", CEL: "children.size()"}},
+			Conditions: []StatusCondition{{
+				Type:    "Ready",
+				Status:  "children.size() > 0 && children.all(c, c.status.ready == true)",
+				Reason:  "AllReady",
+				Message: "all children ready",
+			}},
+		},
+	}
+}
+
+func child(ready bool) any {
+	return map[string]any{"status": map[string]any{"ready": ready}}
+}
+
+func TestApplyStatusAllReady(t *testing.T) {
+	src := object(map[string]any{"name": "chain-1"}, map[string]any{})
+	st, err := ApplyStatus(statusSpec(), src, []any{child(true), child(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := nested(st, "observedServices"); got != int64(2) {
+		t.Errorf("observedServices=%v (%T), want 2", got, got)
+	}
+	conds, ok := st["conditions"].([]any)
+	if !ok || len(conds) != 1 {
+		t.Fatalf("conditions=%v", st["conditions"])
+	}
+	c0 := conds[0].(map[string]any)
+	if c0["type"] != "Ready" || c0["status"] != "True" || c0["reason"] != "AllReady" {
+		t.Errorf("condition=%v", c0)
+	}
+}
+
+func TestApplyStatusOneNotReady(t *testing.T) {
+	src := object(map[string]any{"name": "chain-1"}, map[string]any{})
+	st, err := ApplyStatus(statusSpec(), src, []any{child(true), child(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conds := st["conditions"].([]any)
+	if c0 := conds[0].(map[string]any); c0["status"] != "False" {
+		t.Errorf("status=%v, want False", c0["status"])
+	}
+}
+
+func TestApplyStatusNilWhenUnset(t *testing.T) {
+	spec := statusSpec()
+	spec.Status = nil
+	st, err := ApplyStatus(spec, object(map[string]any{"name": "x"}, map[string]any{}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != nil {
+		t.Errorf("want nil status, got %v", st)
+	}
+}
+
+func TestDefaultsNamespaceAndNameDefault(t *testing.T) {
+	spec := &Spec{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "dpu"},
+		Source:     ObjectRef{Group: "config.openshift.io", Version: "v1", Kind: "DataProcessingUnit"},
+		Defaults:   &Defaults{Namespace: Value{Value: "dpf-operator-system"}},
+		Emit: []Emit{{
+			Target: ObjectRef{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPUFlavor"},
+			// CEL yields "" so the Value-level Default must supply the name.
+			Name:   Value{CEL: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('')", Default: "dpf-default-flavor"},
+			Fields: []Field{{To: "spec.dpuMode", Value: "dpu"}},
+		}},
+	}
+	objs, err := Apply(spec, object(map[string]any{"name": "worker-1"}, map[string]any{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("got %d objects", len(objs))
+	}
+	if objs[0].GetName() != "dpf-default-flavor" {
+		t.Errorf("name=%s, want dpf-default-flavor (Value.Default)", objs[0].GetName())
+	}
+	if objs[0].GetNamespace() != "dpf-operator-system" {
+		t.Errorf("namespace=%s, want dpf-operator-system (spec default)", objs[0].GetNamespace())
+	}
+}
