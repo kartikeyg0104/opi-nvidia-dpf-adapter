@@ -38,8 +38,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/internal/controller"
+	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/lifecycle"
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/mapping"
+	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/translation"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -193,7 +194,7 @@ func main() {
 		for _, emit := range spec.Emit {
 			registerUnstructured(scheme, emit.Target.GVK())
 		}
-		rec := &controller.TranslationReconciler{
+		rec := &translation.Reconciler{
 			Client: mgr.GetClient(),
 			Scheme: mgr.GetScheme(),
 			Spec:   spec,
@@ -204,6 +205,18 @@ func main() {
 		}
 		setupLog.Info("Registered mapping", "name", spec.Metadata.Name, "source", spec.Source.Kind, "emits", len(spec.Emit))
 	}
+
+	// Lifecycle Manager (Hybrid pattern): watch DpuOperatorConfig and ensure the
+	// requested vendor operator is installed/pinned. Placeholder for Helm/OLM.
+	registerUnstructured(scheme, lifecycle.DpuOperatorConfigGVK)
+	if err := (&lifecycle.LifecycleManager{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "LifecycleManager")
+		os.Exit(1)
+	}
+	setupLog.Info("Registered Lifecycle Manager", "watches", lifecycle.DpuOperatorConfigGVK.Kind)
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

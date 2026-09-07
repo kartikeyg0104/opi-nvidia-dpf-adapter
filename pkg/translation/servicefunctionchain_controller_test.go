@@ -14,9 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package translation
 
-// DataProcessingUnit is owned by openshift/dpu-operator (config.openshift.io/v1).
-// This companion repo does not serve that CRD. The watch and the OPI→DPF field
-// mapping are declared in config/mappings/dataprocessingunit.yaml and run by
-// TranslationReconciler.
+import (
+	. "github.com/onsi/ginkgo/v2"
+)
+
+var _ = Describe("ServiceFunctionChain Controller", func() {
+	Context("When reconciling a resource", func() {
+
+		It("should successfully reconcile the resource", func() {
+
+			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
+			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		})
+	})
+})

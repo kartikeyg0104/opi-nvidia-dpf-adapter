@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package translation
 
 import (
 	"context"
@@ -52,10 +52,10 @@ const (
 	CleanupFinalizer = cleanupFinalizer
 )
 
-// TranslationReconciler watches the OPI GVK named in a FieldMapping and
+// Reconciler watches the OPI GVK named in a FieldMapping and
 // applies that mapping to produce DPF objects. Kind-specific logic lives in
 // config/mappings/*.yaml, not in this file.
-type TranslationReconciler struct {
+type Reconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	Spec   *mapping.Spec
@@ -70,7 +70,7 @@ type TranslationReconciler struct {
 // +kubebuilder:rbac:groups=provisioning.dpu.nvidia.com,resources=dpus;dpudevices;dpuflavors;bfbs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=svc.dpu.nvidia.com,resources=dpuservices,verbs=get;list;watch;create;update;patch;delete
 
-func (r *TranslationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("mapping", r.Spec.Metadata.Name)
 
 	src := &unstructured.Unstructured{}
@@ -117,7 +117,7 @@ func (r *TranslationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 // reconcileDelete deletes annotation-tracked children (owner-ref children are
 // left to Kubernetes GC) and then drops the finalizer so the source can go.
-func (r *TranslationReconciler) reconcileDelete(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) (ctrl.Result, error) {
+func (r *Reconciler) reconcileDelete(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(src, cleanupFinalizer) {
 		return ctrl.Result{}, nil
 	}
@@ -135,7 +135,7 @@ func (r *TranslationReconciler) reconcileDelete(ctx context.Context, log logr.Lo
 // annotation names this source. These are the children that could not receive
 // an owner reference (cross-namespace / cluster-vs-namespaced), so GC will not
 // reclaim them; owner-ref children carry no annotation and are skipped.
-func (r *TranslationReconciler) cleanupAnnotatedChildren(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) error {
+func (r *Reconciler) cleanupAnnotatedChildren(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) error {
 	want := annSourceValue(src)
 	objs, err := r.listChildObjects(ctx, src)
 	if err != nil {
@@ -154,7 +154,7 @@ func (r *TranslationReconciler) cleanupAnnotatedChildren(ctx context.Context, lo
 	return nil
 }
 
-func (r *TranslationReconciler) applyOne(ctx context.Context, src, obj *unstructured.Unstructured) error {
+func (r *Reconciler) applyOne(ctx context.Context, src, obj *unstructured.Unstructured) error {
 	stampOwner(src, obj, r.Scheme)
 
 	obj.SetManagedFields(nil)
@@ -168,7 +168,7 @@ func (r *TranslationReconciler) applyOne(ctx context.Context, src, obj *unstruct
 // mirrorStatus rolls the status of emitted children back onto the OPI source,
 // interpreting the mapping's data-driven status: block. No-ops when the mapping
 // declares no status rules or when the computed status matches what is stored.
-func (r *TranslationReconciler) mirrorStatus(ctx context.Context, src *unstructured.Unstructured) error {
+func (r *Reconciler) mirrorStatus(ctx context.Context, src *unstructured.Unstructured) error {
 	if r.Spec.Status == nil {
 		return nil
 	}
@@ -196,7 +196,7 @@ func (r *TranslationReconciler) mirrorStatus(ctx context.Context, src *unstructu
 // listChildObjects returns every emitted child of src, located by the
 // translation labels across each distinct target GVK. Target CRDs that are not
 // installed are skipped rather than failing.
-func (r *TranslationReconciler) listChildObjects(ctx context.Context, src *unstructured.Unstructured) ([]unstructured.Unstructured, error) {
+func (r *Reconciler) listChildObjects(ctx context.Context, src *unstructured.Unstructured) ([]unstructured.Unstructured, error) {
 	sel := client.MatchingLabels{
 		mapping.LabelMapping:    r.Spec.Metadata.Name,
 		mapping.LabelSourceKind: r.Spec.Source.Kind,
@@ -348,7 +348,7 @@ func annSourceValue(src *unstructured.Unstructured) string {
 
 // SetupWithManager watches the mapping's source GVK and owns each distinct DPF
 // target type so a child status change re-triggers status mirroring.
-func (r *TranslationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	src := &unstructured.Unstructured{}
 	src.SetGroupVersionKind(r.Spec.Source.GVK())
 
@@ -371,6 +371,6 @@ func (r *TranslationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // SourceGVK is exposed for tests.
-func (r *TranslationReconciler) SourceGVK() schema.GroupVersionKind {
+func (r *Reconciler) SourceGVK() schema.GroupVersionKind {
 	return r.Spec.Source.GVK()
 }

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package translation
 
 import (
 	"path/filepath"
@@ -74,7 +74,7 @@ func ownerOf(obj *unstructured.Unstructured, kind, name, uid string) metav1.Owne
 	return *found
 }
 
-var _ = Describe("TranslationReconciler owner references", func() {
+var _ = Describe("Reconciler owner references", func() {
 	var specs map[string]*mapping.Spec
 
 	BeforeEach(func() {
@@ -162,7 +162,7 @@ var _ = Describe("TranslationReconciler owner references", func() {
 			src.SetUID("sfc-uid-1")
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(src).WithStatusSubresource(src).Build()
-			r := &TranslationReconciler{Client: cl, Scheme: scheme, Spec: specs["servicefunctionchain"]}
+			r := &Reconciler{Client: cl, Scheme: scheme, Spec: specs["servicefunctionchain"]}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "chain-1", Namespace: "default"}})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -194,7 +194,7 @@ var _ = Describe("TranslationReconciler owner references", func() {
 			})
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(src).WithStatusSubresource(src).Build()
-			r := &TranslationReconciler{Client: cl, Scheme: scheme, Spec: specs["dataprocessingunit"]}
+			r := &Reconciler{Client: cl, Scheme: scheme, Spec: specs["dataprocessingunit"]}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "bf3-worker"}})
 			Expect(err).NotTo(HaveOccurred())
 

@@ -12,12 +12,37 @@ rules:
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - dataprocessingunits/finalizers
+  - servicefunctionchains/finalizers
+  verbs:
+  - update
 - apiGroups:
   - config.openshift.io
   resources:
   - dataprocessingunits/status
   - servicefunctionchains/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - dpuoperatorconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - dpuoperatorconfigs/status
   verbs:
   - get
 - apiGroups:
@@ -29,6 +54,7 @@ rules:
   - dpus
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
@@ -40,6 +66,7 @@ rules:
   - dpuservices
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
