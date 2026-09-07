@@ -22,7 +22,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -41,6 +40,9 @@ const fieldOwner = "opi-nvidia-dpf-adapter"
 // annSource records provenance when Kubernetes GC cannot follow an owner
 // reference (namespaced owner of a cluster-scoped or cross-namespace child).
 const annSource = "translation.opi.nvidia.com/source"
+
+// conditionsKey is the status field holding metav1 conditions.
+const conditionsKey = "conditions"
 
 // cleanupFinalizer lets the controller delete annotation-tracked children that
 // Kubernetes garbage collection cannot reach before the source disappears.
@@ -72,6 +74,7 @@ type Reconciler struct {
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("mapping", r.Spec.Metadata.Name)
+	ctx = logf.IntoContext(ctx, log)
 
 	src := &unstructured.Unstructured{}
 	src.SetGroupVersionKind(r.Spec.Source.GVK())
@@ -83,7 +86,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if ts := src.GetDeletionTimestamp(); ts != nil && !ts.IsZero() {
-		return r.reconcileDelete(ctx, log, src)
+		return r.reconcileDelete(ctx, src)
 	}
 
 	// Ensure the cleanup finalizer before emitting anything, so a delete that
@@ -117,11 +120,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 // reconcileDelete deletes annotation-tracked children (owner-ref children are
 // left to Kubernetes GC) and then drops the finalizer so the source can go.
-func (r *Reconciler) reconcileDelete(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) (ctrl.Result, error) {
+func (r *Reconciler) reconcileDelete(ctx context.Context, src *unstructured.Unstructured) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(src, cleanupFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	if err := r.cleanupAnnotatedChildren(ctx, log, src); err != nil {
+	if err := r.cleanupAnnotatedChildren(ctx, src); err != nil {
 		return ctrl.Result{}, err
 	}
 	controllerutil.RemoveFinalizer(src, cleanupFinalizer)
@@ -135,7 +138,8 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, log logr.Logger, src *
 // annotation names this source. These are the children that could not receive
 // an owner reference (cross-namespace / cluster-vs-namespaced), so GC will not
 // reclaim them; owner-ref children carry no annotation and are skipped.
-func (r *Reconciler) cleanupAnnotatedChildren(ctx context.Context, log logr.Logger, src *unstructured.Unstructured) error {
+func (r *Reconciler) cleanupAnnotatedChildren(ctx context.Context, src *unstructured.Unstructured) error {
+	log := logf.FromContext(ctx)
 	want := annSourceValue(src)
 	objs, err := r.listChildObjects(ctx, src)
 	if err != nil {
@@ -149,7 +153,8 @@ func (r *Reconciler) cleanupAnnotatedChildren(ctx context.Context, log logr.Logg
 		if err := r.Delete(ctx, child); err != nil && !errors.IsNotFound(err) {
 			return fmt.Errorf("delete annotated child %s/%s: %w", child.GetKind(), child.GetName(), err)
 		}
-		log.Info("deleted annotation-tracked child", "kind", child.GetKind(), "name", child.GetName(), "namespace", child.GetNamespace())
+		log.Info("deleted annotation-tracked child",
+			"kind", child.GetKind(), "name", child.GetName(), "namespace", child.GetNamespace())
 	}
 	return nil
 }
@@ -196,7 +201,9 @@ func (r *Reconciler) mirrorStatus(ctx context.Context, src *unstructured.Unstruc
 // listChildObjects returns every emitted child of src, located by the
 // translation labels across each distinct target GVK. Target CRDs that are not
 // installed are skipped rather than failing.
-func (r *Reconciler) listChildObjects(ctx context.Context, src *unstructured.Unstructured) ([]unstructured.Unstructured, error) {
+func (r *Reconciler) listChildObjects(
+	ctx context.Context, src *unstructured.Unstructured,
+) ([]unstructured.Unstructured, error) {
 	sel := client.MatchingLabels{
 		mapping.LabelMapping:    r.Spec.Metadata.Name,
 		mapping.LabelSourceKind: r.Spec.Source.Kind,
@@ -236,7 +243,7 @@ func applyStatus(src *unstructured.Unstructured, desired map[string]any) bool {
 	}
 	changed := false
 	for k, v := range desired {
-		if k == "conditions" {
+		if k == conditionsKey {
 			continue
 		}
 		if !reflect.DeepEqual(cur[k], v) {
@@ -244,11 +251,11 @@ func applyStatus(src *unstructured.Unstructured, desired map[string]any) bool {
 			changed = true
 		}
 	}
-	if desiredConds, ok := desired["conditions"].([]any); ok && len(desiredConds) > 0 {
-		existing, _ := cur["conditions"].([]any)
+	if desiredConds, ok := desired[conditionsKey].([]any); ok && len(desiredConds) > 0 {
+		existing, _ := cur[conditionsKey].([]any)
 		merged, condChanged := mergeConditions(existing, desiredConds)
 		if condChanged {
-			cur["conditions"] = merged
+			cur[conditionsKey] = merged
 			changed = true
 		}
 	}

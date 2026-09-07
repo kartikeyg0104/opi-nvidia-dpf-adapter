@@ -33,7 +33,10 @@ func lcmScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(s)
 	s.AddKnownTypeWithName(DpuOperatorConfigGVK, &unstructured.Unstructured{})
-	s.AddKnownTypeWithName(DpuOperatorConfigGVK.GroupVersion().WithKind("DpuOperatorConfigList"), &unstructured.UnstructuredList{})
+	s.AddKnownTypeWithName(
+		DpuOperatorConfigGVK.GroupVersion().WithKind("DpuOperatorConfigList"),
+		&unstructured.UnstructuredList{},
+	)
 	metav1.AddToGroupVersion(s, DpuOperatorConfigGVK.GroupVersion())
 	return s
 }

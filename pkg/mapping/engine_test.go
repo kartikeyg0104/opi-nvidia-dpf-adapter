@@ -318,7 +318,10 @@ func TestDefaultsNamespaceAndNameDefault(t *testing.T) {
 		Emit: []Emit{{
 			Target: ObjectRef{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPUFlavor"},
 			// CEL yields "" so the Value-level Default must supply the name.
-			Name:   Value{CEL: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('')", Default: "dpf-default-flavor"},
+			Name: Value{
+				CEL:     "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('')",
+				Default: "dpf-default-flavor",
+			},
 			Fields: []Field{{To: "spec.dpuMode", Value: "dpu"}},
 		}},
 	}

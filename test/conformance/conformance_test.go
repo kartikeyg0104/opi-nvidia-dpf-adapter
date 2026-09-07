@@ -119,7 +119,6 @@ spec:
 
 var _ = Describe("Hybrid translation conformance", func() {
 	for _, tc := range cases {
-		tc := tc
 		Context(tc.name, func() {
 			It("stamps controller owner refs on every child (GC proxy) and mirrors status", func() {
 				for _, ns := range tc.ensureNS {

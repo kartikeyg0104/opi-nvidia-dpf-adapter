@@ -163,7 +163,8 @@ var _ = Describe("Reconciler owner references", func() {
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(src).WithStatusSubresource(src).Build()
 			r := &Reconciler{Client: cl, Scheme: scheme, Spec: specs["servicefunctionchain"]}
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "chain-1", Namespace: "default"}})
+			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "chain-1", Namespace: "default"}}
+			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			got := &unstructured.Unstructured{}
@@ -203,13 +204,16 @@ var _ = Describe("Reconciler owner references", func() {
 				gvk  schema.GroupVersionKind
 			}{
 				{"bf3-worker-device", devGVK},
-				{"dpf-default-flavor", schema.GroupVersionKind{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPUFlavor"}},
+				{"dpf-default-flavor", schema.GroupVersionKind{
+					Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPUFlavor",
+				}},
 				{"bf-bundle", schema.GroupVersionKind{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "BFB"}},
 				{"bf3-worker", schema.GroupVersionKind{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPU"}},
 			} {
 				got := &unstructured.Unstructured{}
 				got.SetGroupVersionKind(nameKind.gvk)
-				Expect(cl.Get(ctx, types.NamespacedName{Name: nameKind.name, Namespace: "dpf-operator-system"}, got)).To(Succeed(), nameKind.name)
+				key := types.NamespacedName{Name: nameKind.name, Namespace: "dpf-operator-system"}
+				Expect(cl.Get(ctx, key, got)).To(Succeed(), nameKind.name)
 				ownerOf(got, "DataProcessingUnit", "bf3-worker", "dpu-uid-1")
 			}
 		})
