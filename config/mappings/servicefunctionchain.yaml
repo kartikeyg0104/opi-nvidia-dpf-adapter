@@ -37,14 +37,21 @@ emit:
         required: true
       - to: spec.paused
         value: false
+      # The DPUService CRD requires security.privileged to be set when
+      # deployInCluster is false (the default). false is the safe baseline.
+      - to: spec.security.privileged
+        value: false
 
 # Mirror DPUService readiness back onto the ServiceFunctionChain.
+#
+# NOTE: the current ServiceFunctionChain CRD (dpu-operator) declares an empty
+# status object, so the apiserver prunes everything written here -- this mirror
+# is a no-op until that CRD gains a status schema with conditions[]. The rule
+# is kept so mirroring activates automatically once the upstream schema lands;
+# the conformance suite asserts GC/owner-refs for this source, not status.
 status:
-  fields:
-    - to: status.serviceCount
-      cel: "children.size()"
   conditions:
     - type: Ready
-      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
       reason: AllServicesReady
       message: "All translated DPUServices report Ready"
