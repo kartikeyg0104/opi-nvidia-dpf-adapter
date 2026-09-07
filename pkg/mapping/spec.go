@@ -32,17 +32,27 @@ const Kind = "FieldMapping"
 // Spec is a data-driven OPI→DPF translation document. The controller
 // interprets this file; it does not contain Go switch statements on Kind.
 type Spec struct {
-	APIVersion string    `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string    `json:"kind" yaml:"kind"`
-	Metadata   Metadata  `json:"metadata" yaml:"metadata"`
-	Source     ObjectRef `json:"source" yaml:"source"`
-	Emit       []Emit    `json:"emit" yaml:"emit"`
+	APIVersion string         `json:"apiVersion" yaml:"apiVersion"`
+	Kind       string         `json:"kind" yaml:"kind"`
+	Metadata   Metadata       `json:"metadata" yaml:"metadata"`
+	Source     ObjectRef      `json:"source" yaml:"source"`
+	Defaults   *Defaults      `json:"defaults,omitempty" yaml:"defaults,omitempty"`
+	Emit       []Emit         `json:"emit" yaml:"emit"`
+	Status     *StatusMapping `json:"status,omitempty" yaml:"status,omitempty"`
 }
 
 // Metadata names a mapping document.
 type Metadata struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// Defaults holds values inherited by every emit that does not set them.
+// It removes per-emit boilerplate (notably the DPF namespace fallback that
+// otherwise repeats as an identical CEL expression on every target).
+type Defaults struct {
+	// Namespace is applied to any emit whose own namespace is unset.
+	Namespace Value `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 }
 
 // ObjectRef identifies a Kubernetes GVK the mapping reads or writes.
@@ -82,7 +92,7 @@ type Field struct {
 	// From is a dotted JSONPath on the source object (or current forEach item
 	// when prefixed with "item.").
 	From string `json:"from,omitempty" yaml:"from,omitempty"`
-	// CEL is a CEL expression evaluated against {source, item}.
+	// CEL is a CEL expression evaluated against {source, item, children}.
 	CEL string `json:"cel,omitempty" yaml:"cel,omitempty"`
 	// Value is a literal YAML scalar, object, or list.
 	Value any `json:"value,omitempty" yaml:"value,omitempty"`
@@ -93,10 +103,14 @@ type Field struct {
 }
 
 // Value is a name/namespace expression. Exactly one of From, CEL, or Value.
+// Default and Required mirror Field so name/namespace can carry a fallback
+// and be enforced, rather than only spec.* fields.
 type Value struct {
-	From  string `json:"from,omitempty" yaml:"from,omitempty"`
-	CEL   string `json:"cel,omitempty" yaml:"cel,omitempty"`
-	Value string `json:"value,omitempty" yaml:"value,omitempty"`
+	From     string `json:"from,omitempty" yaml:"from,omitempty"`
+	CEL      string `json:"cel,omitempty" yaml:"cel,omitempty"`
+	Value    string `json:"value,omitempty" yaml:"value,omitempty"`
+	Default  any    `json:"default,omitempty" yaml:"default,omitempty"`
+	Required bool   `json:"required,omitempty" yaml:"required,omitempty"`
 }
 
 func (v Value) empty() bool {
@@ -104,7 +118,7 @@ func (v Value) empty() bool {
 }
 
 func (v Value) asField() Field {
-	return Field{From: v.From, CEL: v.CEL, Value: nonEmpty(v.Value)}
+	return Field{From: v.From, CEL: v.CEL, Value: nonEmpty(v.Value), Default: v.Default, Required: v.Required}
 }
 
 func nonEmpty(s string) any {
@@ -112,6 +126,28 @@ func nonEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// StatusMapping declares how the status of emitted DPF children is mirrored
+// back onto the OPI source's .status. It is the reverse direction of Emit and
+// keeps status roll-up as data, not Go. Rules are evaluated with CEL variables
+// source (the OPI object) and children (the list of emitted child objects,
+// each an unstructured map located by the translation labels).
+type StatusMapping struct {
+	// Fields write computed values onto the source, addressed by dotted path
+	// rooted at the object (e.g. status.observedServices).
+	Fields []Field `json:"fields,omitempty" yaml:"fields,omitempty"`
+	// Conditions are metav1-style conditions upserted onto status.conditions.
+	Conditions []StatusCondition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+}
+
+// StatusCondition is one mirrored condition. Status is a CEL expression that
+// must evaluate to bool; Type/Reason/Message are literals.
+type StatusCondition struct {
+	Type    string `json:"type" yaml:"type"`
+	Status  string `json:"status" yaml:"status"`
+	Reason  string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
 // Validate reports schema errors in the mapping document itself.
@@ -128,6 +164,11 @@ func (s *Spec) Validate() error {
 	if s.Source.Kind == "" || s.Source.Version == "" {
 		return fmt.Errorf("source.group/version/kind is required")
 	}
+	if s.Defaults != nil && !s.Defaults.Namespace.empty() {
+		if err := valueSourcesOK("defaults.namespace", s.Defaults.Namespace); err != nil {
+			return err
+		}
+	}
 	if len(s.Emit) == 0 {
 		return fmt.Errorf("emit: at least one target is required")
 	}
@@ -138,44 +179,73 @@ func (s *Spec) Validate() error {
 		if e.Name.empty() {
 			return fmt.Errorf("emit[%d].name is required", i)
 		}
-		if err := sourcesOK("emit[%d].name", i, e.Name.From, e.Name.CEL, e.Name.Value != ""); err != nil {
+		if err := valueSourcesOK(fmt.Sprintf("emit[%d].name", i), e.Name); err != nil {
 			return err
 		}
+		if !e.Namespace.empty() {
+			if err := valueSourcesOK(fmt.Sprintf("emit[%d].namespace", i), e.Namespace); err != nil {
+				return err
+			}
+		}
 		for j, f := range e.Fields {
-			if f.To == "" {
-				return fmt.Errorf("emit[%d].fields[%d].to is required", i, j)
+			if err := validateField(fmt.Sprintf("emit[%d].fields[%d]", i, j), f); err != nil {
+				return err
 			}
-			n := 0
-			if f.From != "" {
-				n++
+		}
+	}
+	if s.Status != nil {
+		for i, f := range s.Status.Fields {
+			if err := validateField(fmt.Sprintf("status.fields[%d]", i), f); err != nil {
+				return err
 			}
-			if f.CEL != "" {
-				n++
+		}
+		for i, c := range s.Status.Conditions {
+			if strings.TrimSpace(c.Type) == "" {
+				return fmt.Errorf("status.conditions[%d].type is required", i)
 			}
-			if f.Value != nil {
-				n++
-			}
-			if n != 1 {
-				return fmt.Errorf("emit[%d].fields[%d]: exactly one of from, cel, or value must be set", i, j)
+			if strings.TrimSpace(c.Status) == "" {
+				return fmt.Errorf("status.conditions[%d].status (CEL) is required", i)
 			}
 		}
 	}
 	return nil
 }
 
-func sourcesOK(fmtStr string, i int, from, cel string, hasValue bool) error {
+// validateField enforces "to is set" and "exactly one of from/cel/value".
+func validateField(where string, f Field) error {
+	if f.To == "" {
+		return fmt.Errorf("%s.to is required", where)
+	}
 	n := 0
-	if from != "" {
+	if f.From != "" {
 		n++
 	}
-	if cel != "" {
+	if f.CEL != "" {
 		n++
 	}
-	if hasValue {
+	if f.Value != nil {
 		n++
 	}
 	if n != 1 {
-		return fmt.Errorf(fmtStr+": exactly one of from, cel, or value must be set", i)
+		return fmt.Errorf("%s: exactly one of from, cel, or value must be set", where)
+	}
+	return nil
+}
+
+// valueSourcesOK enforces "exactly one of from/cel/value" for a Value.
+func valueSourcesOK(where string, v Value) error {
+	n := 0
+	if v.From != "" {
+		n++
+	}
+	if v.CEL != "" {
+		n++
+	}
+	if v.Value != "" {
+		n++
+	}
+	if n != 1 {
+		return fmt.Errorf("%s: exactly one of from, cel, or value must be set", where)
 	}
 	return nil
 }

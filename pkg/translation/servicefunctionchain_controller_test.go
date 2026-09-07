@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package translation
 
 import (
 	"context"
@@ -80,7 +80,7 @@ var _ = Describe("ServiceFunctionChain translation", func() {
 					},
 				},
 			})
-			fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(sfc).Build()
+			fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(sfc).WithStatusSubresource(sfc).Build()
 			Expect(reconcileSFC(fakeClient, scheme, spec, sfc)).To(Succeed())
 
 			svc := &unstructured.Unstructured{}
@@ -110,7 +110,7 @@ var _ = Describe("ServiceFunctionChain translation", func() {
 					"image": "nginx:latest",
 				},
 			})
-			fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(sfc).Build()
+			fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(sfc).WithStatusSubresource(sfc).Build()
 			Expect(reconcileSFC(fakeClient, scheme, spec, sfc)).To(Succeed())
 
 			svc := &unstructured.Unstructured{}
@@ -125,7 +125,7 @@ var _ = Describe("ServiceFunctionChain translation", func() {
 })
 
 func reconcileSFC(c client.Client, scheme *runtime.Scheme, spec *mapping.Spec, sfc *unstructured.Unstructured) error {
-	r := &TranslationReconciler{Client: c, Scheme: scheme, Spec: spec}
+	r := &Reconciler{Client: c, Scheme: scheme, Spec: spec}
 	_, err := r.Reconcile(context.Background(), reconcile.Request{
 		NamespacedName: types.NamespacedName{Name: sfc.GetName(), Namespace: sfc.GetNamespace()},
 	})
