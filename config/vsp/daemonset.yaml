@@ -1,6 +1,10 @@
 # Local-dev DaemonSet. On kind there is no BlueField; the mock enumerator
 # stamps --serial-number onto every DataProcessingUnit whose spec.nodeName
 # matches this node. Replace the mock flags with --pci on real hardware.
+#
+# Restricted PSS: no hostNetwork, drop ALL, read-only root, emptyDir for
+# the vendor-plugin unix socket. Kind's control-plane taint is tolerated
+# so a one-node cluster still schedules the VSP.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -17,9 +21,17 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/component: vsp
+        app.kubernetes.io/name: opi-nvidia-dpf-adapter
     spec:
       serviceAccountName: nvidia-vsp
-      hostNetwork: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+      - operator: Exists
       containers:
       - name: vsp
         image: controller:latest
@@ -27,8 +39,8 @@ spec:
         - /vsp
         args:
         - --metrics-bind-address=0
-        - --serial-number=$(DPU_SERIAL_NUMBER)
-        - --bfb-url=$(DPU_BFB_URL)
+        - --health-probe-bind-address=:8082
+        imagePullPolicy: IfNotPresent
         env:
         - name: NODE_NAME
           valueFrom:
@@ -38,3 +50,42 @@ spec:
           value: MT25066004A1
         - name: DPU_BFB_URL
           value: https://example.invalid/fw.bfb
+        ports:
+        - containerPort: 8082
+          name: health
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - name: grpc-socket
+          mountPath: /var/run/dpu-daemon
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+      volumes:
+      - name: grpc-socket
+        emptyDir: {}

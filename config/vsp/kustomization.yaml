@@ -1,0 +1,12 @@
+# Mock VSP for kind. The same image as the manager; the DaemonSet
+# overrides the command to /vsp. On real hardware, swap --serial-number
+# for --pci.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- rbac.yaml
+- daemonset.yaml
+images:
+- name: controller
+  newName: controller
+  newTag: latest

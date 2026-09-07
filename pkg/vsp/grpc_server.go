@@ -17,9 +17,14 @@ limitations under the License.
 // Package vsp is the NVIDIA Vendor-Specific Plugin gRPC surface.
 //
 // The in-tree dpu-operator daemon dials a unix socket and expects
-// LifeCycle.Init plus DeviceService.GetDevices. Generated stubs come from
-// github.com/openshift/dpu-operator/dpu-api (the module path still used by
-// opiproject/dpu-operator). This repo does not run protoc.
+// LifeCycle.Init plus DeviceService.GetDevices. One listener multiplexes:
+//
+//   - opi-api lifecycle (opi_api.lifecycle.v1alpha1.*) — what GrpcPlugin
+//     currently dials for Init/GetDevices
+//   - dpu-api Vendor.* — NetworkFunction (no-op ack; DPF owns Helm) plus
+//     the same handshake for the vendor-specific path
+//
+// Generated stubs are imported; this repo does not run protoc.
 package vsp
 
 import (
@@ -32,7 +37,9 @@ import (
 
 	"github.com/go-logr/logr"
 	pb "github.com/openshift/dpu-operator/dpu-api/gen"
+	opi "github.com/opiproject/opi-api/v1/gen/go/lifecycle/v1alpha1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/discovery"
@@ -106,16 +113,25 @@ func (s *Server) SetNumVfs(_ context.Context, req *pb.VfCount) (*pb.VfCount, err
 	return &pb.VfCount{VfCnt: req.GetVfCnt()}, nil
 }
 
-// CreateNetworkFunction is a stub; NVIDIA network functions are Helm charts
-// translated out-of-tree, not created over this RPC.
+// CreateNetworkFunction acknowledges the daemon's CNI add path.
+//
+// The dpu-operator DpuSideManager calls this with two MAC addresses once a
+// network-function pod has both CNI attachments. NVIDIA chain members are
+// DPUService Helm charts emitted by the translation engine, so this RPC
+// must return success without provisioning anything itself. NFRequest has
+// no name field; input/output are the identity the daemon sends.
 func (s *Server) CreateNetworkFunction(_ context.Context, req *pb.NFRequest) (*pb.Empty, error) {
-	s.Log.Info("CreateNetworkFunction", "input", req.GetInput(), "output", req.GetOutput())
-	return &pb.Empty{}, nil
+	return s.ackNetworkFunction("CreateNetworkFunction", req)
 }
 
-// DeleteNetworkFunction is a stub matching CreateNetworkFunction.
+// DeleteNetworkFunction acknowledges the matching CNI del path.
 func (s *Server) DeleteNetworkFunction(_ context.Context, req *pb.NFRequest) (*pb.Empty, error) {
-	s.Log.Info("DeleteNetworkFunction", "input", req.GetInput(), "output", req.GetOutput())
+	return s.ackNetworkFunction("DeleteNetworkFunction", req)
+}
+
+func (s *Server) ackNetworkFunction(rpc string, req *pb.NFRequest) (*pb.Empty, error) {
+	s.Log.Info("Received NetworkFunction request; DPF owns provisioning",
+		"rpc", rpc, "input", req.GetInput(), "output", req.GetOutput())
 	return &pb.Empty{}, nil
 }
 
@@ -147,6 +163,10 @@ func (s *Server) Start(ctx context.Context) error {
 	pb.RegisterDeviceServiceServer(s.grpcServer, s)
 	pb.RegisterNetworkFunctionServiceServer(s.grpcServer, s)
 	pb.RegisterHeartbeatServiceServer(s.grpcServer, s)
+	hs := &opiHandshake{s: s}
+	opi.RegisterLifeCycleServiceServer(s.grpcServer, hs)
+	opi.RegisterDeviceServiceServer(s.grpcServer, hs)
+	reflection.Register(s.grpcServer)
 
 	s.Log.Info("serving vendor plugin", "socket", s.SocketPath)
 

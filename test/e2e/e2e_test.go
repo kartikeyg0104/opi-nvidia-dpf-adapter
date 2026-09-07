@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -33,17 +34,30 @@ import (
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/test/utils"
 )
 
-// namespace where the project is deployed in
-const namespace = "opi-nvidia-dpf-adapter-system"
+const (
+	// namespace where the project is deployed in
+	namespace = "opi-nvidia-dpf-adapter-system"
 
-// serviceAccountName created for the project
-const serviceAccountName = "opi-nvidia-dpf-adapter-controller-manager"
+	// serviceAccountName created for the project
+	serviceAccountName = "opi-nvidia-dpf-adapter-controller-manager"
 
-// metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "opi-nvidia-dpf-adapter-controller-manager-metrics-service"
+	// metricsServiceName is the name of the metrics service of the project
+	metricsServiceName = "opi-nvidia-dpf-adapter-controller-manager-metrics-service"
 
-// metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "opi-nvidia-dpf-adapter-metrics-binding"
+	// metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
+	metricsRoleBindingName = "opi-nvidia-dpf-adapter-metrics-binding"
+
+	dpfNamespace = "dpf-operator-system"
+	e2eDPUName   = "bf3-e2e"
+	e2eSFCName   = "e2e-hbn"
+	e2eChartNF   = "hbn"
+	e2eImageNF   = "skip-image"
+	mockSerial   = "MT25066004A1"
+	mockBFBURL   = "https://example.invalid/fw.bfb"
+	vspLabel     = "app.kubernetes.io/component=vsp"
+	e2eCRDsPath  = "test/e2e/crds"
+	e2eSFCPath   = "test/e2e/testdata/servicefunctionchain.yaml"
+)
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -63,12 +77,18 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
 
-		By("installing CRDs")
-		cmd = exec.Command("make", "install")
+		By("installing OPI source CRDs and NVIDIA DPF CRDs")
+		cmd = exec.Command("kubectl", "apply", "-k", e2eCRDsPath)
 		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
+		Expect(err).NotTo(HaveOccurred(), "Failed to install OPI/DPF CRDs")
+		waitForCRDs()
 
-		By("deploying the controller-manager")
+		By("creating the namespace DPF objects land in for cluster-scoped sources")
+		cmd = exec.Command("kubectl", "create", "ns", dpfNamespace)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to create "+dpfNamespace)
+
+		By("deploying the controller-manager and mock VSP")
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
@@ -81,16 +101,24 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
 		_, _ = utils.Run(cmd)
 
-		By("undeploying the controller-manager")
+		By("deleting translation fixtures")
+		cmd = exec.Command("kubectl", "delete", "dataprocessingunit", e2eDPUName, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "-f", e2eSFCPath, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+
+		By("undeploying the controller-manager and mock VSP")
 		cmd = exec.Command("make", "undeploy")
 		_, _ = utils.Run(cmd)
 
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
+		By("uninstalling OPI and DPF CRDs")
+		cmd = exec.Command("kubectl", "delete", "--ignore-not-found", "-k", e2eCRDsPath)
 		_, _ = utils.Run(cmd)
 
-		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace)
+		By("removing DPF and manager namespaces")
+		cmd = exec.Command("kubectl", "delete", "ns", dpfNamespace, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 	})
 
@@ -133,6 +161,29 @@ var _ = Describe("Manager", Ordered, func() {
 				fmt.Println("Pod description:\n", podDescription)
 			} else {
 				fmt.Println("Failed to describe controller pod")
+			}
+
+			By("Fetching mock VSP logs")
+			cmd = exec.Command("kubectl", "logs", "-l", vspLabel, "-n", namespace, "--tail=200")
+			vspLogs, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "VSP logs:\n %s", vspLogs)
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get VSP logs: %s", err)
+			}
+
+			By("Fetching translated DPF objects")
+			cmd = exec.Command("kubectl", "get",
+				"dpudevices.provisioning.dpu.nvidia.com,dpuflavors.provisioning.dpu.nvidia.com,bfbs.provisioning.dpu.nvidia.com,dpus.provisioning.dpu.nvidia.com",
+				"-n", dpfNamespace, "-o", "wide")
+			dpfOut, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "DPF objects:\n%s", dpfOut)
+			}
+			cmd = exec.Command("kubectl", "get", "dpuservice", "-A", "-o", "wide")
+			svcOut, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "DPUService objects:\n%s", svcOut)
 			}
 		}
 	})
@@ -269,16 +320,102 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
+	})
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+	Context("Translation", func() {
+		It("should run the mock VSP and stamp a DataProcessingUnit serial", func() {
+			By("waiting for the mock VSP DaemonSet pod")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-l", vspLabel,
+					"-o", "jsonpath={.items[0].status.phase}", "-n", namespace)
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "VSP pod not found")
+				g.Expect(strings.TrimSpace(out)).To(Equal("Running"))
+			}).Should(Succeed())
+
+			By("applying a DataProcessingUnit whose nodeName matches the kind node")
+			nodeName := clusterNodeName()
+			applyDataProcessingUnit(nodeName)
+
+			By("waiting for the VSP to stamp the serial annotation")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "dataprocessingunit", e2eDPUName,
+					"-o", `go-template={{index .metadata.annotations "provisioning.dpu.nvidia.com/serial-number"}}`)
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(strings.TrimSpace(out)).To(Equal(mockSerial))
+			}).Should(Succeed())
+		})
+
+		It("should emit DPUDevice, DPUFlavor, BFB, and DPU from the annotated DPU", func() {
+			By("waiting for DPUDevice")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "dpudevices.provisioning.dpu.nvidia.com",
+					e2eDPUName+"-device", "-n", dpfNamespace,
+					"-o", "jsonpath={.spec.serialNumber}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "DPUDevice not created")
+				g.Expect(strings.TrimSpace(out)).To(Equal(mockSerial))
+			}).Should(Succeed())
+
+			By("waiting for DPUFlavor")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "dpuflavors.provisioning.dpu.nvidia.com",
+					"dpf-default-flavor", "-n", dpfNamespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "DPUFlavor not created")
+			}).Should(Succeed())
+
+			By("waiting for BFB")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "bfbs.provisioning.dpu.nvidia.com",
+					"bf-bundle", "-n", dpfNamespace, "-o", "jsonpath={.spec.url}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "BFB not created")
+				g.Expect(strings.TrimSpace(out)).To(Equal(mockBFBURL))
+			}).Should(Succeed())
+
+			By("waiting for DPU")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "dpus.provisioning.dpu.nvidia.com",
+					e2eDPUName, "-n", dpfNamespace, "-o", "jsonpath={.spec.serialNumber}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "DPU not created")
+				g.Expect(strings.TrimSpace(out)).To(Equal(mockSerial))
+			}).Should(Succeed())
+		})
+
+		It("should emit a DPUService for the Helm-chart NF and skip the image-only NF", func() {
+			By("applying a ServiceFunctionChain with one chart NF and one image NF")
+			cmd := exec.Command("kubectl", "apply", "-f", e2eSFCPath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply "+e2eSFCName)
+
+			By("waiting for DPUService helmChart fields")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "dpuservices.svc.dpu.nvidia.com",
+					e2eChartNF, "-n", "default",
+					"-o", "jsonpath={.spec.helmChart.source.repoURL}")
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "DPUService not created")
+				g.Expect(strings.TrimSpace(out)).To(Equal("https://helm.ngc.nvidia.com/nvidia/doca"))
+			}).Should(Succeed())
+
+			cmd = exec.Command("kubectl", "get", "dpuservices.svc.dpu.nvidia.com",
+				e2eChartNF, "-n", "default", "-o", "jsonpath={.spec.helmChart.source.version}")
+			version, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.TrimSpace(version)).To(Equal("v25.10.1"))
+
+			By("asserting the image-only NF never becomes a DPUService")
+			Consistently(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "dpuservices.svc.dpu.nvidia.com",
+					e2eImageNF, "-n", "default")
+				_, err := utils.Run(cmd)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(Or(ContainSubstring("NotFound"), ContainSubstring("not found")))
+			}, 8*time.Second, time.Second).Should(Succeed())
+		})
 	})
 })
 
@@ -336,4 +473,48 @@ type tokenRequest struct {
 	Status struct {
 		Token string `json:"token"`
 	} `json:"status"`
+}
+
+func waitForCRDs() {
+	crds := []string{
+		"dataprocessingunits.config.openshift.io",
+		"servicefunctionchains.config.openshift.io",
+		"dpudevices.provisioning.dpu.nvidia.com",
+		"dpuflavors.provisioning.dpu.nvidia.com",
+		"bfbs.provisioning.dpu.nvidia.com",
+		"dpus.provisioning.dpu.nvidia.com",
+		"dpuservices.svc.dpu.nvidia.com",
+	}
+	for _, crd := range crds {
+		By("waiting for CRD " + crd)
+		cmd := exec.Command("kubectl", "wait", "--for=condition=Established",
+			"crd/"+crd, "--timeout=60s")
+		_, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "CRD not established: "+crd)
+	}
+}
+
+func clusterNodeName() string {
+	cmd := exec.Command("kubectl", "get", "nodes", "-o", "jsonpath={.items[0].metadata.name}")
+	out, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to read kind node name")
+	Expect(out).NotTo(BeEmpty())
+	return strings.TrimSpace(out)
+}
+
+func applyDataProcessingUnit(nodeName string) {
+	yaml := fmt.Sprintf(`apiVersion: config.openshift.io/v1
+kind: DataProcessingUnit
+metadata:
+  name: %s
+spec:
+  dpuProductName: BlueField-3
+  isDpuSide: false
+  nodeName: %s
+`, e2eDPUName, nodeName)
+	path := filepath.Join(os.TempDir(), "opi-e2e-dataprocessingunit.yaml")
+	Expect(os.WriteFile(path, []byte(yaml), os.FileMode(0o644))).To(Succeed())
+	cmd := exec.Command("kubectl", "apply", "-f", path)
+	_, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to apply DataProcessingUnit")
 }
