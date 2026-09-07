@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package translation
 
 import (
 	"context"
@@ -80,7 +80,7 @@ func TestFinalizerAndCleanup(t *testing.T) {
 	src.SetUID("sfc-uid")
 
 	cl := fake.NewClientBuilder().WithScheme(sch).WithObjects(src).Build()
-	r := &TranslationReconciler{Client: cl, Scheme: sch, Spec: spec}
+	r := &Reconciler{Client: cl, Scheme: sch, Spec: spec}
 	ctx := context.Background()
 	srcNN := types.NamespacedName{Name: "xns-chain", Namespace: "opi"}
 	childNN := types.NamespacedName{Name: "hbn", Namespace: "dpf-operator-system"}

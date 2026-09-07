@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
-	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/internal/controller"
+	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/translation"
 )
 
 // childSpec is an emitted DPF object a case expects. setReady mocks the DPF
@@ -170,13 +170,13 @@ var _ = Describe("Hybrid translation conformance", func() {
 	}
 })
 
-// reconcileOnce drives the TranslationReconciler for one mapping/source through
+// reconcileOnce drives the translation.Reconciler for one mapping/source through
 // a single Reconcile against the envtest apiserver.
 func reconcileOnce(mappingName string, nn types.NamespacedName) {
 	GinkgoHelper()
 	spec, ok := specs[mappingName]
 	Expect(ok).To(BeTrue(), "mapping %q not loaded", mappingName)
-	r := &controller.TranslationReconciler{Client: k8sClient, Scheme: scheme, Spec: spec}
+	r := &translation.Reconciler{Client: k8sClient, Scheme: scheme, Spec: spec}
 	_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
 	Expect(err).NotTo(HaveOccurred())
 }
@@ -288,10 +288,10 @@ spec:
 		Expect(child.GetOwnerReferences()).To(BeEmpty(),
 			"cross-namespace child must NOT carry an owner reference (GC cannot reclaim it)")
 		Expect(child.GetAnnotations()).To(
-			HaveKeyWithValue(controller.AnnSource, "ServiceFunctionChain:opi/xns-chain"))
+			HaveKeyWithValue(translation.AnnSource, "ServiceFunctionChain:opi/xns-chain"))
 
 		stored := getObject(sfcGVK, srcNN)
-		Expect(stored.GetFinalizers()).To(ContainElement(controller.CleanupFinalizer),
+		Expect(stored.GetFinalizers()).To(ContainElement(translation.CleanupFinalizer),
 			"source must carry the cleanup finalizer so the child can be reclaimed")
 
 		By("deleting the source and reconciling the deletion")
