@@ -12,6 +12,11 @@ source:
   group: config.openshift.io
   version: v1
   kind: DataProcessingUnit
+# Emitted children land in the source namespace, or dpf-operator-system when
+# the source is cluster-scoped. Declared once here instead of on every emit.
+defaults:
+  namespace:
+    cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
 emit:
   - target:
       group: provisioning.dpu.nvidia.com
@@ -19,8 +24,6 @@ emit:
       kind: DPUDevice
     name:
       cel: "source.metadata.name + '-device'"
-    namespace:
-      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
     fields:
       - to: spec.serialNumber
         cel: "source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue('')"
@@ -32,8 +35,6 @@ emit:
       kind: DPUFlavor
     name:
       cel: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('dpf-default-flavor')"
-    namespace:
-      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
     fields:
       - to: spec.dpuMode
         value: dpu
@@ -44,8 +45,6 @@ emit:
       kind: BFB
     name:
       cel: "source.metadata.?annotations['dpu.nvidia.com/bfb'].orValue('bf-bundle')"
-    namespace:
-      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
     fields:
       - to: spec.url
         cel: "source.metadata.?annotations['dpu.nvidia.com/bfb-url'].orValue('')"
@@ -57,8 +56,6 @@ emit:
       kind: DPU
     name:
       from: metadata.name
-    namespace:
-      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
     fields:
       # 1:1 JSONPath copies
       - to: spec.dpuNodeName
@@ -74,7 +71,21 @@ emit:
       - to: spec.serialNumber
         cel: "source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue('')"
         required: true
-      # CEL-enforced "exactly one of" nodeEffect shapes: noEffect is the
-      # safe local-dev default (no host drain, no taint).
+      # Literal default: noEffect is the safe local-dev default (no host drain,
+      # no taint). This is a plain value, not a CEL-enforced constraint.
       - to: spec.nodeEffect.noEffect
         value: true
+
+# Mirror the emitted children's readiness back onto the DataProcessingUnit.
+# A child is ready when it carries a metav1 condition Ready=True. Evaluated
+# with `children` (the emitted objects) and `source`; CEL is null-safe so
+# children that have not yet published status do not error the roll-up.
+status:
+  fields:
+    - to: status.emittedObjects
+      cel: "children.size()"
+  conditions:
+    - type: Ready
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      reason: AllChildrenReady
+      message: "All emitted DPF objects report Ready"

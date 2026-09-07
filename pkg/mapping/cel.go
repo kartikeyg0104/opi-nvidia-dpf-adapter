@@ -34,13 +34,27 @@ func env() (*cel.Env, error) {
 		celEnv, celErr = cel.NewEnv(
 			cel.Variable("source", cel.MapType(cel.StringType, cel.DynType)),
 			cel.Variable("item", cel.DynType),
+			cel.Variable("children", cel.ListType(cel.DynType)),
 			cel.OptionalTypes(),
 		)
 	})
 	return celEnv, celErr
 }
 
-func evalCEL(expr string, source map[string]any, item any) (any, error) {
+// celVars builds a complete CEL activation. Every declared variable must be
+// present at eval time, so unused directions pass their zero value: forward
+// field mapping has no children ([]), status mapping has no forEach item ({}).
+func celVars(source map[string]any, item any, children []any) map[string]any {
+	if item == nil {
+		item = map[string]any{}
+	}
+	if children == nil {
+		children = []any{}
+	}
+	return map[string]any{"source": source, "item": item, "children": children}
+}
+
+func evalCEL(expr string, vars map[string]any) (any, error) {
 	e, err := env()
 	if err != nil {
 		return nil, err
@@ -53,24 +67,18 @@ func evalCEL(expr string, source map[string]any, item any) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cel program %q: %w", expr, err)
 	}
-	if item == nil {
-		item = map[string]any{}
-	}
-	out, _, err := prg.Eval(map[string]any{
-		"source": source,
-		"item":   item,
-	})
+	out, _, err := prg.Eval(vars)
 	if err != nil {
 		return nil, fmt.Errorf("cel eval %q: %w", expr, err)
 	}
 	return out.Value(), nil
 }
 
-func evalBool(expr string, source map[string]any, item any) (bool, error) {
+func evalBool(expr string, vars map[string]any) (bool, error) {
 	if expr == "" {
 		return true, nil
 	}
-	v, err := evalCEL(expr, source, item)
+	v, err := evalCEL(expr, vars)
 	if err != nil {
 		return false, err
 	}
