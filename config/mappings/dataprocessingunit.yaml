@@ -66,7 +66,7 @@ emit:
         cel: "source.metadata.name + '-device'"
       - to: spec.dpuFlavor
         cel: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('dpf-default-flavor')"
-      - to: spec.bfb.name
+      - to: spec.bfb
         cel: "source.metadata.?annotations['dpu.nvidia.com/bfb'].orValue('bf-bundle')"
       - to: spec.serialNumber
         cel: "source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue('')"
@@ -77,15 +77,18 @@ emit:
         value: true
 
 # Mirror the emitted children's readiness back onto the DataProcessingUnit.
-# A child is ready when it carries a metav1 condition Ready=True. Evaluated
-# with `children` (the emitted objects) and `source`; CEL is null-safe so
-# children that have not yet published status do not error the roll-up.
+# The DataProcessingUnit CRD status schema defines conditions[] (metav1), so a
+# Ready condition mirrors cleanly; custom scalar status fields would be pruned
+# by the apiserver and are intentionally omitted.
+#
+# Readiness contract: the source is Ready when every child that publishes
+# conditions reports Ready=True. Children whose CRD has no status subresource
+# (e.g. DPUFlavor) expose no conditions and are treated as non-blocking -- this
+# is the "smoothing" of a vendor status quirk the mapping layer is meant to do.
+# CEL is null-safe so children without status never error the roll-up.
 status:
-  fields:
-    - to: status.emittedObjects
-      cel: "children.size()"
   conditions:
     - type: Ready
-      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
       reason: AllChildrenReady
-      message: "All emitted DPF objects report Ready"
+      message: "All emitted DPF objects that publish readiness report Ready"
