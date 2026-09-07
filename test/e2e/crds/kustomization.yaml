@@ -1,0 +1,7 @@
+# CRDs this adapter does not own. make install is a no-op; e2e
+# applies these before the translator starts.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- opi
+- dpf

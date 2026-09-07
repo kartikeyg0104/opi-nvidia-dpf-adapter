@@ -1,0 +1,44 @@
+# Vendored NVIDIA DPF CRDs from doca-platform.
+# The translator only writes DPUDevice, DPUFlavor, BFB, DPU, and
+# DPUService; the rest are installed so the kind API surface matches
+# a DPF-ready cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- noderesources.dpu.nvidia.com_nodesriovdevicepluginconfigs.yaml
+- provisioning.dpu.nvidia.com_bfbs.yaml
+- provisioning.dpu.nvidia.com_bluefieldsoftwares.yaml
+- provisioning.dpu.nvidia.com_dpuclusters.yaml
+- provisioning.dpu.nvidia.com_dpudevices.yaml
+- provisioning.dpu.nvidia.com_dpudiscoveries.yaml
+- provisioning.dpu.nvidia.com_dpuflavors.yaml
+- provisioning.dpu.nvidia.com_dpuflavortemplates.yaml
+- provisioning.dpu.nvidia.com_dpunodemaintenances.yaml
+- provisioning.dpu.nvidia.com_dpunodes.yaml
+- provisioning.dpu.nvidia.com_dpus.yaml
+- provisioning.dpu.nvidia.com_dpusets.yaml
+- storage.dpu.nvidia.com_dpustoragepolicies.yaml
+- storage.dpu.nvidia.com_dpustoragevendors.yaml
+- storage.dpu.nvidia.com_dpuvolumeattachments.yaml
+- storage.dpu.nvidia.com_dpuvolumes.yaml
+- storage.dpu.nvidia.com_svvolumeattachments.yaml
+- storage.dpu.nvidia.com_volumeattachments.yaml
+- storage.dpu.nvidia.com_volumes.yaml
+- svc.dpu.nvidia.com_dpudeployments.yaml
+- svc.dpu.nvidia.com_dpuservicechains.yaml
+- svc.dpu.nvidia.com_dpuserviceconfigurations.yaml
+- svc.dpu.nvidia.com_dpuservicecredentialrequests.yaml
+- svc.dpu.nvidia.com_dpuserviceinterfaces.yaml
+- svc.dpu.nvidia.com_dpuserviceipams.yaml
+- svc.dpu.nvidia.com_dpuservicenads.yaml
+- svc.dpu.nvidia.com_dpuservices.yaml
+- svc.dpu.nvidia.com_dpuservicetemplates.yaml
+- svc.dpu.nvidia.com_nodeserviceinterfaces.yaml
+- svc.dpu.nvidia.com_servicechains.yaml
+- svc.dpu.nvidia.com_servicechainsets.yaml
+- svc.dpu.nvidia.com_serviceinterfaces.yaml
+- svc.dpu.nvidia.com_serviceinterfacesets.yaml
+- vpc.dpu.nvidia.com_dpuvirtualnetworks.yaml
+- vpc.dpu.nvidia.com_dpuvpcs.yaml
+- vpc.dpu.nvidia.com_isolationclasses.yaml

@@ -35,7 +35,7 @@ const (
 	testNode    = "kind-worker"
 	testSerial  = "MTEXAMPLE0001"
 	testPCI     = "0000:03:00.0"
-	testProduct = "BlueField-3"
+	testProduct = productBlueField3
 	testDPUName = "bf3-worker"
 	testBFBURL  = "https://example.invalid/fw.bfb"
 )

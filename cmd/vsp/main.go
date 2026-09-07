@@ -63,6 +63,7 @@ func main() {
 		bfbName      string
 		usePCI       bool
 		grpcSocket   string
+		grpcOnly     bool
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "metrics listen address; 0 disables")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8082", "health probe listen address")
@@ -78,6 +79,8 @@ func main() {
 	flag.BoolVar(&usePCI, "pci", false, "scan sysfs for vendor 0x15b3 instead of using --serial-number")
 	flag.StringVar(&grpcSocket, "grpc-socket", vsp.DefaultSocket,
 		"unix socket the dpu-operator daemon dials")
+	flag.BoolVar(&grpcOnly, "grpc-only", false,
+		"serve the vendor plugin unix socket without a Kubernetes client")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -95,6 +98,15 @@ func main() {
 		enumerator = discovery.MockEnumerator{
 			Devices: []discovery.Device{discovery.StaticDevice(serialNumber, pciAddress, productName)},
 		}
+	}
+
+	if grpcOnly {
+		setupLog.Info("starting NVIDIA VSP gRPC only", "socket", grpcSocket, "pci-mode", usePCI)
+		if err := vsp.NewServer(enumerator, grpcSocket).Start(ctrl.SetupSignalHandler()); err != nil {
+			setupLog.Error(err, "vendor plugin gRPC server exited")
+			os.Exit(1)
+		}
+		return
 	}
 
 	registerUnstructured(scheme, discovery.DataProcessingUnitGVK)
