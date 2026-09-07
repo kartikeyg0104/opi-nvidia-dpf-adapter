@@ -77,3 +77,48 @@ It may **not**:
 - encode NVIDIA-specific defaults in Go
 
 NVIDIA-specific defaults belong in `config/mappings/*.yaml`. That is the companion-repo analogue of `opi-nvidia-bridge`: vendor knowledge lives here, not in `openshift/dpu-operator`.
+
+## Spec-level defaults
+
+`defaults:` supplies values inherited by every emit that does not set them,
+removing per-emit boilerplate. Today it carries `namespace` (a `Value`), which
+an emit uses only when it declares no `namespace` of its own:
+
+```yaml
+defaults:
+  namespace:
+    cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
+```
+
+`name` and `namespace` (both `Value`) also accept `default:` and `required:`,
+mirroring `fields[]`: `default` supplies a fallback when `from`/`cel` resolves
+empty, and `required: true` fails the mapping if it is still empty.
+
+## Status mirroring
+
+`status:` is the reverse direction of `emit:` — it rolls the status of the
+emitted DPF children back onto the OPI source's `.status`. It keeps status
+roll-up as data, not Go. Rules evaluate with two CEL variables:
+
+- `source` — the OPI object as a map.
+- `children` — the list of emitted child objects (each an unstructured map),
+  located by the `translation.opi.nvidia.com/*` labels the engine stamps.
+
+```yaml
+status:
+  fields:                          # dotted paths rooted at the object
+    - to: status.serviceCount
+      cel: "children.size()"
+  conditions:                      # upserted onto status.conditions by type
+    - type: Ready
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      reason: AllServicesReady
+      message: "All translated DPUServices report Ready"
+```
+
+Each `conditions[]` entry's `status` is a CEL expression that must evaluate to
+bool; `type`, `reason`, and `message` are literals. Write null-safe CEL
+(`.?field.orValue(...)`) so children that have not yet published status do not
+error the roll-up. The controller upserts conditions by `type`, preserving
+`lastTransitionTime` while a condition's status is unchanged and stamping a
+fresh time when it flips.

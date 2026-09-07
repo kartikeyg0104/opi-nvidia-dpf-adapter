@@ -46,6 +46,10 @@ linters:
   exclusions:
     generated: lax
     rules:
+      # kubebuilder markers must stay on one line and can exceed the limit.
+      - linters:
+          - lll
+        source: "^//\\s*\\+kubebuilder:"
       - linters:
           - lll
         path: api/*

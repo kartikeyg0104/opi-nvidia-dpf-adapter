@@ -12,6 +12,9 @@ source:
   group: config.openshift.io
   version: v1
   kind: ServiceFunctionChain
+defaults:
+  namespace:
+    cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
 emit:
   - target:
       group: svc.dpu.nvidia.com
@@ -22,8 +25,6 @@ emit:
     when: "'chart' in item"
     name:
       cel: "item.name"
-    namespace:
-      cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'dpf-operator-system'"
     fields:
       - to: spec.serviceID
         from: item.name
@@ -40,3 +41,17 @@ emit:
       # false (the default). NVIDIA DPUServices run on the DPU.
       - to: spec.security.privileged
         value: true
+
+# Mirror DPUService readiness back onto the ServiceFunctionChain.
+#
+# NOTE: the current ServiceFunctionChain CRD (dpu-operator) declares an empty
+# status object, so the apiserver prunes everything written here -- this mirror
+# is a no-op until that CRD gains a status schema with conditions[]. The rule
+# is kept so mirroring activates automatically once the upstream schema lands;
+# the conformance suite asserts GC/owner-refs for this source, not status.
+status:
+  conditions:
+    - type: Ready
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      reason: AllServicesReady
+      message: "All translated DPUServices report Ready"

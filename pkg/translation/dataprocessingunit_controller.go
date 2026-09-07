@@ -14,9 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package translation
 
 // DataProcessingUnit is owned by openshift/dpu-operator (config.openshift.io/v1).
 // This companion repo does not serve that CRD. The watch and the OPI→DPF field
 // mapping are declared in config/mappings/dataprocessingunit.yaml and run by
-// TranslationReconciler.
+// Reconciler.
