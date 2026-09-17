@@ -122,3 +122,16 @@ bool; `type`, `reason`, and `message` are literals. Write null-safe CEL
 error the roll-up. The controller upserts conditions by `type`, preserving
 `lastTransitionTime` while a condition's status is unchanged and stamping a
 fresh time when it flips.
+
+## Multiple vendors on one source kind
+
+Two mapping documents may declare the same `source`. `cmd/main.go` then starts
+one controller per mapping and both reconcile every object of that kind, so each
+`emit` needs a `when` guard that claims only its own hardware, and each mapping
+must mirror a **distinct** condition type — the controller upserts conditions by
+`type`, so a shared `Ready` would have the two mappings overwrite each other
+every reconcile.
+
+`config/mappings/amd-dsc200.yaml` is the worked example, and
+[docs/multi-vendor.md](multi-vendor.md) covers the routing, the condition-
+ownership limitation it exposes, and what is still needed from the lab hosts.

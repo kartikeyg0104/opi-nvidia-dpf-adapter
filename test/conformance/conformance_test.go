@@ -18,6 +18,7 @@ package conformance
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -39,6 +40,12 @@ type childSpec struct {
 	gvk      schema.GroupVersionKind
 	name, ns string
 	setReady bool
+	// wantFields are dotted paths on the emitted child mapped to the value the
+	// mapping must have written there. This is what turns the suite from an
+	// owner-ref check into a translation check: it pins the destination shape,
+	// so a vendor whose CRs nest what another vendor flattens is actually
+	// exercised rather than assumed.
+	wantFields map[string]any
 }
 
 // conformanceCase is one vendor-agnostic row: a mock OPI source, the mapping
@@ -57,9 +64,25 @@ type conformanceCase struct {
 	// expectReady asserts the source carries a mirrored Ready=True condition
 	// after status-capable children are marked ready.
 	expectReady bool
+	// readyCondition is the condition type this mapping mirrors, defaulting to
+	// Ready. Mappings that share a source kind must not share a condition type:
+	// the controller upserts conditions by type, so two vendors both writing
+	// Ready would overwrite each other on every reconcile.
+	readyCondition string
 }
 
-const dpfNS = "dpf-operator-system"
+// readyConditionType is the condition a case asserts, defaulting to Ready.
+func (c conformanceCase) readyConditionType() string {
+	if c.readyCondition != "" {
+		return c.readyCondition
+	}
+	return "Ready"
+}
+
+const (
+	dpfNS = "dpf-operator-system"
+	amdNS = "amd-dpu-system"
+)
 
 var cases = []conformanceCase{
 	{
@@ -115,6 +138,82 @@ spec:
 		},
 		expectReady: true,
 	},
+	{
+		// Second vendor, same source kind, same engine, zero Go. Driven by the
+		// real VPD product string off dh1 (the isolation spec below uses the
+		// normalised "DSC2-100" form, so both spellings stay covered). The expected
+		// destination shapes below are deliberately not the DPF ones: nested
+		// refs instead of name strings, a nested firmware image, an inverted
+		// drain flag, and a mode derived from spec.isDpuSide.
+		name:        "DataProcessingUnit → DSCDevice/DSCProfile/DSCFirmware/DSCNodePolicy (AMD Pensando)",
+		mappingName: "amd-dsc200",
+		srcGVK:      dpuGVK,
+		srcNN:       types.NamespacedName{Name: "conf-dsc2"},
+		ensureNS:    []string{amdNS},
+		sourceYAML: `
+apiVersion: config.openshift.io/v1
+kind: DataProcessingUnit
+metadata:
+  name: conf-dsc2
+  annotations:
+    dpu.amd.com/serial-number: "MYFLEPK31D02ZH"
+    dpu.amd.com/pci-address: "0000:1b:00.0"
+    dpu.amd.com/firmware-url: "https://example.invalid/dsc/1.46.0-E-28.tar"
+spec:
+  dpuProductName: Pensando DSC2-100 100G 2p QSFP56 DPU
+  isDpuSide: false
+  nodeName: dh1
+`,
+		children: []childSpec{
+			{
+				gvk: dscDeviceGVK, name: "conf-dsc2-dsc", ns: amdNS, setReady: true,
+				wantFields: map[string]any{
+					// hardware identity is carried, never invented
+					"spec.deviceSerial": "MYFLEPK31D02ZH",
+					"spec.pciAddress":   "0000:1b:00.0",
+					// 1:1 JSONPath into a differently named destination.
+					// The raw PCI VPD Product Name from dh1, not a tidied form:
+					// the vendor guard must match what the hardware reports.
+					"spec.productName": "Pensando DSC2-100 100G 2p QSFP56 DPU",
+					// literal defaults with no OPI counterpart
+					"spec.management.driver":    "ionic",
+					"spec.management.interface": "oob",
+				},
+			},
+			{
+				gvk: dscFirmwareGVK, name: "dsc-fw-bundle", ns: amdNS, setReady: true,
+				wantFields: map[string]any{
+					// DPF puts this at the flat BFB.spec.url; AMD nests it.
+					"spec.image.url":     "https://example.invalid/dsc/1.46.0-E-28.tar",
+					"spec.image.version": "1.46.0-E-28",
+				},
+			},
+			{
+				gvk: dscPolicyGVK, name: "conf-dsc2", ns: amdNS, setReady: true,
+				wantFields: map[string]any{
+					"spec.nodeName": "dh1",
+					// object refs where DPF uses bare name strings
+					"spec.deviceRef.name":   "conf-dsc2-dsc",
+					"spec.profileRef.name":  "dsc-default-profile",
+					"spec.firmwareRef.name": "dsc-fw-bundle",
+					// inverted sense of DPU.spec.nodeEffect.noEffect: true
+					"spec.drain.enabled": false,
+				},
+			},
+			{
+				// DSCProfile has no status subresource, the same quirk DPUFlavor
+				// has: it publishes no conditions and must not block readiness.
+				gvk: dscProfileGVK, name: "dsc-default-profile", ns: amdNS, setReady: false,
+				wantFields: map[string]any{
+					// derived from spec.isDpuSide, a field the DPF mapping ignores
+					"spec.mode":           "smartnic",
+					"spec.hostInterfaces": int64(2),
+				},
+			},
+		},
+		expectReady:    true,
+		readyCondition: "DSCReady",
+	},
 }
 
 var _ = Describe("Hybrid translation conformance", func() {
@@ -143,6 +242,7 @@ var _ = Describe("Hybrid translation conformance", func() {
 				for _, ch := range tc.children {
 					obj := getObject(ch.gvk, types.NamespacedName{Name: ch.name, Namespace: ch.ns})
 					assertControllerOwnerRef(obj, tc.srcGVK.Kind, tc.srcNN.Name, uid)
+					assertFields(obj, ch.wantFields)
 					if ch.setReady {
 						markChildReady(ch.gvk, types.NamespacedName{Name: ch.name, Namespace: ch.ns})
 					}
@@ -158,11 +258,12 @@ var _ = Describe("Hybrid translation conformance", func() {
 					return
 				}
 				if tc.expectReady {
+					condType := tc.readyConditionType()
 					got := getObject(tc.srcGVK, tc.srcNN)
-					cond := conditionByType(got, "Ready")
-					Expect(cond).NotTo(BeNil(), "source is missing a mirrored Ready condition")
+					cond := conditionByType(got, condType)
+					Expect(cond).NotTo(BeNil(), "source is missing a mirrored %s condition", condType)
 					Expect(cond["status"]).To(Equal("True"),
-						"mirrored Ready condition should be True once ready children report Ready")
+						"mirrored %s condition should be True once ready children report Ready", condType)
 				}
 			})
 		})
@@ -203,6 +304,19 @@ func getObject(gvk schema.GroupVersionKind, nn types.NamespacedName) *unstructur
 	obj.SetGroupVersionKind(gvk)
 	Expect(k8sClient.Get(ctx, nn, obj)).To(Succeed(), "%s %s", gvk.Kind, nn)
 	return obj
+}
+
+// assertFields checks every dotted path in want against the emitted object.
+// Values come back from the apiserver already JSON-normalised, so integers are
+// int64 and a case states them that way.
+func assertFields(obj *unstructured.Unstructured, want map[string]any) {
+	GinkgoHelper()
+	for path, expected := range want {
+		got, found, err := unstructured.NestedFieldNoCopy(obj.Object, strings.Split(path, ".")...)
+		Expect(err).NotTo(HaveOccurred(), "%s %s: reading %s", obj.GetKind(), obj.GetName(), path)
+		Expect(found).To(BeTrue(), "%s %s: mapping did not write %s", obj.GetKind(), obj.GetName(), path)
+		Expect(got).To(Equal(expected), "%s %s: %s", obj.GetKind(), obj.GetName(), path)
+	}
 }
 
 func assertControllerOwnerRef(obj *unstructured.Unstructured, kind, name, uid string) {
@@ -310,3 +424,87 @@ spec:
 			"source should be deleted once the cleanup finalizer is removed")
 	})
 })
+
+// This is the Phase 2 claim in executable form. Two FieldMapping documents
+// watch the same OPI kind (DataProcessingUnit) and target two different vendor
+// APIs. In a mixed cluster cmd/main.go starts one controller per mapping, so
+// every DataProcessingUnit is reconciled by both. Each must translate only its
+// own hardware, decided by spec.dpuProductName in the mapping's `when` guard --
+// no vendor branch anywhere in pkg/ or cmd/.
+var _ = Describe("Multi-vendor isolation (two mappings, one OPI kind)", func() {
+	It("routes each DataProcessingUnit to exactly one vendor's object set", func() {
+		ensureNamespace(dpfNS)
+		ensureNamespace(amdNS)
+
+		amdNN := types.NamespacedName{Name: "iso-dsc2"}
+		bfNN := types.NamespacedName{Name: "iso-bf3"}
+
+		amdSrc := fromYAML(`
+apiVersion: config.openshift.io/v1
+kind: DataProcessingUnit
+metadata:
+  name: iso-dsc2
+  annotations:
+    dpu.amd.com/serial-number: "MYFLEPK31D02ZH"
+    dpu.amd.com/firmware-url: "https://example.invalid/dsc.tar"
+spec:
+  dpuProductName: DSC2-100
+  isDpuSide: false
+  nodeName: dh1
+`)
+		bfSrc := fromYAML(`
+apiVersion: config.openshift.io/v1
+kind: DataProcessingUnit
+metadata:
+  name: iso-bf3
+  annotations:
+    provisioning.dpu.nvidia.com/serial-number: "MT1234ISO"
+    dpu.nvidia.com/bfb-url: "https://example.invalid/fw.bfb"
+spec:
+  dpuProductName: BlueField-3
+  isDpuSide: false
+  nodeName: kind-worker
+`)
+		Expect(k8sClient.Create(ctx, amdSrc)).To(Succeed())
+		Expect(k8sClient.Create(ctx, bfSrc)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, amdSrc)
+			_ = k8sClient.Delete(ctx, bfSrc)
+		})
+
+		By("running every mapping against every source, as a mixed cluster would")
+		for _, m := range []string{"dataprocessingunit", "amd-dsc200"} {
+			reconcileOnce(m, amdNN)
+			reconcileOnce(m, bfNN)
+		}
+
+		By("the AMD card produced AMD CRs and no DPF CRs")
+		getObject(dscDeviceGVK, types.NamespacedName{Name: "iso-dsc2-dsc", Namespace: amdNS})
+		getObject(dscPolicyGVK, types.NamespacedName{Name: "iso-dsc2", Namespace: amdNS})
+		expectAbsent(devGVK, types.NamespacedName{Name: "iso-dsc2-device", Namespace: dpfNS})
+		expectAbsent(provDPU, types.NamespacedName{Name: "iso-dsc2", Namespace: dpfNS})
+
+		By("the BlueField card produced DPF CRs and no AMD CRs")
+		getObject(devGVK, types.NamespacedName{Name: "iso-bf3-device", Namespace: dpfNS})
+		getObject(provDPU, types.NamespacedName{Name: "iso-bf3", Namespace: dpfNS})
+		expectAbsent(dscDeviceGVK, types.NamespacedName{Name: "iso-bf3-dsc", Namespace: amdNS})
+		expectAbsent(dscPolicyGVK, types.NamespacedName{Name: "iso-bf3", Namespace: amdNS})
+
+		By("the shared singletons stayed with their own vendor")
+		// Both mappings default a flavor/profile name. They must not collide,
+		// and neither may appear in the other vendor's namespace.
+		expectAbsent(flavorGVK, types.NamespacedName{Name: "dpf-default-flavor", Namespace: amdNS})
+		expectAbsent(dscProfileGVK, types.NamespacedName{Name: "dsc-default-profile", Namespace: dpfNS})
+	})
+})
+
+// expectAbsent asserts no such object exists -- the negative half of the
+// vendor-isolation proof.
+func expectAbsent(gvk schema.GroupVersionKind, nn types.NamespacedName) {
+	GinkgoHelper()
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	err := k8sClient.Get(ctx, nn, obj)
+	Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+		"%s %s should not exist: the other vendor's mapping claimed this source", gvk.Kind, nn)
+}

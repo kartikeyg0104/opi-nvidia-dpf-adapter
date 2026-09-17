@@ -1,0 +1,33 @@
+# OPI DataProcessingUnit for the AMD Pensando DSC2-100 in lab host dh1.
+#
+# Same kind, same controller, same engine as bf3-worker in
+# dataprocessingunit.yaml -- only spec.dpuProductName differs, and that is
+# what routes it to config/mappings/amd-dsc200.yaml instead of the DPF
+# mapping. Translating it emits DSCDevice + DSCProfile + DSCFirmware +
+# DSCNodePolicy into amd-dpu-system.
+#
+# Every value below was read off the live card in dh1 on 2026-09-17
+# (lspci -vvv -s 1b:00.0; devlink dev info pci/0000:19:00.0). On a real
+# cluster cmd/vsp would stamp the annotations instead of them being hand-written
+# -- though note pkg/discovery/pci.go does not enumerate this card yet: it
+# filters on PCI vendor 0x15b3 (NVIDIA) and the DSC is 0x1dd8.
+#
+# dpuProductName is the VPD Product Name verbatim. It is deliberately NOT the
+# tidy "DSC2-100": the mapping's vendor guard has to cope with what the hardware
+# actually reports, and this sample is what proves it does.
+#
+# nodeName: the host answers to hostname "opi", not "dh1" (it was renamed).
+# Whatever node name the cluster registers is what must go here.
+apiVersion: config.openshift.io/v1
+kind: DataProcessingUnit
+metadata:
+  name: dsc2-dh1
+  annotations:
+    dpu.amd.com/serial-number: MYFLEPK31D02ZH
+    dpu.amd.com/pci-address: "0000:1b:00.0"
+    dpu.amd.com/firmware-url: https://example.invalid/dsc/1.46.0-E-28.tar
+    dpu.amd.com/firmware-version: 1.46.0-E-28
+spec:
+  dpuProductName: Pensando DSC2-100 100G 2p QSFP56 DPU
+  isDpuSide: false
+  nodeName: opi
