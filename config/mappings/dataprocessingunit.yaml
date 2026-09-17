@@ -22,6 +22,10 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: DPUDevice
+    # Vendor guard: claim BlueField only. amd-dsc200.yaml watches this same
+    # OPI kind, so without this an AMD DSC card would also sprout DPF CRs.
+    # orValue('BlueField') keeps DPF the default when dpuProductName is unset.
+    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
     name:
       cel: "source.metadata.name + '-device'"
     fields:
@@ -33,6 +37,7 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: DPUFlavor
+    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
     name:
       cel: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('dpf-default-flavor')"
     fields:
@@ -43,6 +48,7 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: BFB
+    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
     name:
       cel: "source.metadata.?annotations['dpu.nvidia.com/bfb'].orValue('bf-bundle')"
     fields:
@@ -54,6 +60,7 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: DPU
+    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
     name:
       from: metadata.name
     fields:
