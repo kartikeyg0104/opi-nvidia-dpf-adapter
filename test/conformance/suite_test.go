@@ -24,6 +24,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -66,6 +67,17 @@ var (
 	provDPU   = schema.GroupVersionKind{Group: "provisioning.dpu.nvidia.com", Version: "v1alpha1", Kind: "DPU"}
 )
 
+// Second vendor (AMD Pensando DSC). Schemas are stubs under crds/amd until the
+// real CRDs come off lab host dh1; the GVKs are what config/mappings/amd-dsc200.yaml
+// emits. Named here only so cases can refer to them -- the suite registers every
+// GVK a loaded mapping mentions, so a third vendor needs no edit here.
+var (
+	dscDeviceGVK   = schema.GroupVersionKind{Group: "dpu.amd.com", Version: "v1alpha1", Kind: "DSCDevice"}
+	dscProfileGVK  = schema.GroupVersionKind{Group: "dpu.amd.com", Version: "v1alpha1", Kind: "DSCProfile"}
+	dscFirmwareGVK = schema.GroupVersionKind{Group: "dpu.amd.com", Version: "v1alpha1", Kind: "DSCFirmware"}
+	dscPolicyGVK   = schema.GroupVersionKind{Group: "dpu.amd.com", Version: "v1alpha1", Kind: "DSCNodePolicy"}
+)
+
 func registerUnstructured(s *runtime.Scheme, gvk schema.GroupVersionKind) {
 	s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
@@ -81,12 +93,19 @@ var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 	ctx, cancel = context.WithCancel(context.TODO())
 
+	// Mappings load first: the scheme below is derived from them, so dropping a
+	// new vendor's FieldMapping into config/mappings is enough to have this
+	// suite serve that vendor's GVKs. No Go edit per vendor.
+	specs = loadSpecs()
+
 	crdDirs := siblingCRDDirs()
 	for _, d := range crdDirs {
 		if _, err := os.Stat(d); err != nil {
 			Skip("sibling CRD dir not found (need dpu-operator + doca-platform checked out beside this repo): " + d)
 		}
 	}
+	// Vendor CRDs vendored into this repo (stubs, or real ones once fetched).
+	crdDirs = append(crdDirs, localCRDDirs()...)
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     crdDirs,
@@ -105,27 +124,56 @@ var _ = BeforeSuite(func() {
 
 	scheme = runtime.NewScheme()
 	Expect(clientgoscheme.AddToScheme(scheme)).To(Succeed())
-	for _, gvk := range []schema.GroupVersionKind{sfcGVK, dpuGVK, svcGVK, devGVK, flavorGVK, bfbGVK, provDPU} {
+	for _, gvk := range gvksFromSpecs(specs) {
 		registerUnstructured(scheme, gvk)
 	}
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
-
-	loaded, err := mapping.LoadDir(filepath.Join("..", "..", "config", "mappings"))
-	Expect(err).NotTo(HaveOccurred())
-	specs = map[string]*mapping.Spec{}
-	for _, s := range loaded {
-		specs[s.Metadata.Name] = s
-	}
-	// Conformance-only fixtures (e.g. the cross-namespace cleanup mapping).
-	fixtures, err := mapping.LoadDir("testdata")
-	Expect(err).NotTo(HaveOccurred())
-	for _, s := range fixtures {
-		specs[s.Metadata.Name] = s
-	}
 })
+
+// loadSpecs reads the shipped mappings plus the conformance-only fixtures
+// (e.g. the cross-namespace cleanup mapping), keyed by metadata.name.
+func loadSpecs() map[string]*mapping.Spec {
+	GinkgoHelper()
+	out := map[string]*mapping.Spec{}
+	for _, dir := range []string{filepath.Join("..", "..", "config", "mappings"), "testdata"} {
+		loaded, err := mapping.LoadDir(dir)
+		Expect(err).NotTo(HaveOccurred(), "load mappings from %s", dir)
+		for _, s := range loaded {
+			out[s.Metadata.Name] = s
+		}
+	}
+	return out
+}
+
+// gvksFromSpecs returns every GVK the loaded mappings read or write, in a
+// stable order. Registering from the mappings rather than a hardcoded list is
+// what makes a new vendor a data-only change for this suite too.
+func gvksFromSpecs(byName map[string]*mapping.Spec) []schema.GroupVersionKind {
+	seen := map[schema.GroupVersionKind]bool{}
+	var out []schema.GroupVersionKind
+	add := func(gvk schema.GroupVersionKind) {
+		if !seen[gvk] {
+			seen[gvk] = true
+			out = append(out, gvk)
+		}
+	}
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	for _, n := range names {
+		s := byName[n]
+		add(s.Source.GVK())
+		for _, e := range s.Emit {
+			add(e.Target.GVK())
+		}
+	}
+	return out
+}
 
 var _ = AfterSuite(func() {
 	if cancel != nil {
@@ -146,6 +194,13 @@ func siblingCRDDirs() []string {
 		filepath.Join(ws, "doca-platform", "config", "dpuservice", "crd", "bases"),
 		filepath.Join(ws, "doca-platform", "config", "provisioning", "crd", "bases"),
 	}
+}
+
+// localCRDDirs returns CRD directories vendored into this repo. Vendors whose
+// CRDs are not published as a Go module (or not yet fetched off the lab hosts)
+// land here; crds/amd currently holds stubs modelled on the DSC2-100 in dh1.
+func localCRDDirs() []string {
+	return []string{filepath.Join("crds", "amd")}
 }
 
 // envtestBinDir mirrors the controller suite: find kube-apiserver/etcd under

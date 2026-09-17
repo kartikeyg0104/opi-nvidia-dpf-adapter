@@ -5,6 +5,7 @@
 configMapGenerator:
 - name: mappings
   files:
+  - amd-dsc200.yaml
   - dataprocessingunit.yaml
   - servicefunctionchain.yaml
 generatorOptions:

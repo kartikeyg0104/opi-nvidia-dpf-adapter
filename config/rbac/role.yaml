@@ -46,6 +46,21 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - dpu.amd.com
+  resources:
+  - dscdevices
+  - dscfirmwares
+  - dscnodepolicies
+  - dscprofiles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - provisioning.dpu.nvidia.com
   resources:
   - bfbs
