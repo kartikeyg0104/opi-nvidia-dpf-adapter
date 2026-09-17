@@ -1,0 +1,155 @@
+apiVersion: translation.opi.nvidia.com/v1alpha1
+kind: FieldMapping
+metadata:
+  name: amd-dsc200
+  description: |
+    Second-vendor proof: the same OPI DataProcessingUnit that expands into
+    NVIDIA DPF objects in dataprocessingunit.yaml expands here into the AMD
+    Pensando DSC object set. Nothing in pkg/ or cmd/ knows AMD exists --
+    this file is the entire vendor port.
+
+    The AMD target shape is deliberately NOT a rename of the DPF shape, so
+    the suite exercises the engine rather than a naming convention:
+      * flat string -> nested object     (BFB.spec.url -> DSCFirmware.spec.image.url)
+      * flat string -> nested ref        (DPU.spec.dpuDeviceName -> deviceRef.name)
+      * inverted boolean                 (nodeEffect.noEffect: true -> drain.enabled: false)
+      * derived enum                     (spec.isDpuSide -> mode: dpu | smartnic)
+      * 1:1 JSONPath to a different name (spec.nodeName -> spec.nodeName, dpuProductName -> productName)
+
+    Target CRDs are stubs under test/conformance/crds/amd until the real
+    ones are pulled off lab host dh1; see docs/multi-vendor.md.
+source:
+  group: config.openshift.io
+  version: v1
+  kind: DataProcessingUnit
+
+# AMD children land in the source namespace, or amd-dpu-system when the
+# source is cluster-scoped -- the DSC operator's analogue of
+# dpf-operator-system. Declared once, inherited by every emit.
+defaults:
+  namespace:
+    cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'amd-dpu-system'"
+
+# Vendor guard. Both this mapping and dataprocessingunit.yaml watch the same
+# OPI kind, so each emit must claim only its own hardware or an AMD card would
+# also sprout BlueField CRs. spec.dpuProductName is the OPI API's own "vendor
+# and model name" field.
+#
+# `matches`, not `startsWith`. Verified against the card in lab host dh1: its
+# PCI VPD Product Name is the full marketing string
+#
+#     "Pensando DSC2-100 100G 2p QSFP56 DPU"
+#
+# which does NOT start with "DSC" -- it starts with "Pensando". An earlier
+# startsWith('DSC') guard silently emitted nothing for the real hardware while
+# passing every test that used the tidy "DSC2-100" form. The alternation
+# accepts both the raw VPD string and a normalised product name, and matches
+# neither "BlueField-3" nor any other DPF product.
+#
+# Repeated per emit because `when` is per-emit today. A spec-level selector
+# would collapse these four copies into one -- noted in docs/multi-vendor.md
+# as the first candidate engine change, and deliberately not taken here so
+# this vendor port stays pure data.
+emit:
+  # ---------------------------------------------------------------- device
+  # The card itself: serial is hardware identity, so it is never invented.
+  # cmd/vsp stamps it as an annotation after enumerating PCI (vendor 0x1dd8
+  # on dh1), exactly as it does for BlueField.
+  - target:
+      group: dpu.amd.com
+      version: v1alpha1
+      kind: DSCDevice
+    when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"
+    name:
+      cel: "source.metadata.name + '-dsc'"
+    fields:
+      - to: spec.deviceSerial
+        cel: "source.metadata.?annotations['dpu.amd.com/serial-number'].orValue('')"
+        required: true
+      - to: spec.pciAddress
+        cel: "source.metadata.?annotations['dpu.amd.com/pci-address'].orValue('')"
+      # 1:1 JSONPath copy into a differently named destination field.
+      - to: spec.productName
+        from: spec.dpuProductName
+        required: true
+      # Literal defaults: the DSC management function binds to the ionic
+      # driver out of band (dh1: 1b:00.0, enp27s0np0, 169.254.27.2).
+      - to: spec.management.driver
+        value: ionic
+      - to: spec.management.interface
+        cel: "source.metadata.?annotations['dpu.amd.com/mgmt-interface'].orValue('oob')"
+
+  # --------------------------------------------------------------- profile
+  # Personality. DPF spells this DPUFlavor.spec.dpuMode and hardcodes "dpu";
+  # AMD's equivalent is derived from an OPI field the DPF mapping ignores.
+  - target:
+      group: dpu.amd.com
+      version: v1alpha1
+      kind: DSCProfile
+    when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"
+    name:
+      cel: "source.metadata.?annotations['dpu.amd.com/profile'].orValue('dsc-default-profile')"
+    fields:
+      - to: spec.mode
+        cel: "source.spec.?isDpuSide.orValue(false) ? 'dpu' : 'smartnic'"
+      # DSC2-100 is a 2-port QSFP56 card (dh1 VPD).
+      - to: spec.hostInterfaces
+        value: 2
+
+  # -------------------------------------------------------------- firmware
+  # DPF's BFB carries a flat spec.url; AMD nests url+version under spec.image.
+  # Same OPI annotations, different destination shape -- the point of the test.
+  - target:
+      group: dpu.amd.com
+      version: v1alpha1
+      kind: DSCFirmware
+    when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"
+    name:
+      cel: "source.metadata.?annotations['dpu.amd.com/firmware'].orValue('dsc-fw-bundle')"
+    fields:
+      - to: spec.image.url
+        cel: "source.metadata.?annotations['dpu.amd.com/firmware-url'].orValue('')"
+        required: true
+      - to: spec.image.version
+        cel: "source.metadata.?annotations['dpu.amd.com/firmware-version'].orValue('1.46.0-E-28')"
+
+  # ----------------------------------------------------------- node policy
+  # The binding object, AMD's analogue of provisioning DPU. Its three refs are
+  # objects, not strings, and its drain switch is the inverse of nodeEffect.
+  - target:
+      group: dpu.amd.com
+      version: v1alpha1
+      kind: DSCNodePolicy
+    when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"
+    name:
+      from: metadata.name
+    fields:
+      - to: spec.nodeName
+        from: spec.nodeName
+        required: true
+      - to: spec.deviceRef.name
+        cel: "source.metadata.name + '-dsc'"
+      - to: spec.profileRef.name
+        cel: "source.metadata.?annotations['dpu.amd.com/profile'].orValue('dsc-default-profile')"
+      - to: spec.firmwareRef.name
+        cel: "source.metadata.?annotations['dpu.amd.com/firmware'].orValue('dsc-fw-bundle')"
+      # DPF says nodeEffect.noEffect: true for "do not disturb the host".
+      # AMD says drain.enabled: false. Same intent, inverted literal.
+      - to: spec.drain.enabled
+        value: false
+
+# Mirror the AMD children's readiness back onto the DataProcessingUnit, using
+# the identical null-safe roll-up the DPF mapping uses. DSCProfile has no
+# status subresource (same quirk as DPUFlavor) so it publishes no conditions
+# and is non-blocking -- the vendor-quirk smoothing is vendor-independent.
+#
+# The condition type is vendor-scoped on purpose. The controller upserts
+# conditions by type, so if this mapping and dataprocessingunit.yaml both
+# wrote `Ready` onto the same source they would overwrite each other every
+# reconcile. See docs/multi-vendor.md, "Condition ownership".
+status:
+  conditions:
+    - type: DSCReady
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      reason: AllChildrenReady
+      message: "All emitted AMD DSC objects that publish readiness report Ready"

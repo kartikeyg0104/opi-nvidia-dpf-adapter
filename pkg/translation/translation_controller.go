@@ -71,6 +71,13 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains/finalizers,verbs=update
 // +kubebuilder:rbac:groups=provisioning.dpu.nvidia.com,resources=dpus;dpudevices;dpuflavors;bfbs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=svc.dpu.nvidia.com,resources=dpuservices,verbs=get;list;watch;create;update;patch;delete
+//
+// Second vendor (config/mappings/amd-dsc200.yaml). Only the RBAC marker is
+// per-vendor: controller-gen sources the ClusterRole from these comments, so a
+// mapping that targets a new API group needs its group listed here even though
+// no Go logic changes. Generating RBAC from the mapping documents instead would
+// make a vendor port entirely data -- see docs/multi-vendor.md.
+// +kubebuilder:rbac:groups=dpu.amd.com,resources=dscdevices;dscprofiles;dscfirmwares;dscnodepolicies,verbs=get;list;watch;create;update;patch;delete
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("mapping", r.Spec.Metadata.Name)
