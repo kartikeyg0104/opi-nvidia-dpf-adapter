@@ -136,6 +136,110 @@ func TestAnnotatorRejectsEmptySerial(t *testing.T) {
 	}
 }
 
+// The serial key must follow the hardware. Stamping the NVIDIA key on an AMD
+// card leaves amd-dsc200.yaml without a serial and fails its required field.
+func TestAnnotatorStampsVendorSpecificSerialKey(t *testing.T) {
+	cases := []struct {
+		name     string
+		vendorID uint16
+		product  string
+		wantKey  string
+	}{
+		{"nvidia", NVIDIAVendorID, productBlueField3, SerialNumberAnnotation},
+		{"amd", AMDVendorID, productPensandoDSC, AMDSerialNumberAnnotation},
+		{"marvell", MarvellVendorID, productMarvellDPU, MarvellSerialNumberAnnotation},
+	}
+	allKeys := []string{SerialNumberAnnotation, AMDSerialNumberAnnotation, MarvellSerialNumberAnnotation}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := newDPUScheme(t)
+			dpu := newDPU(testDPUName, testNode)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dpu).Build()
+
+			a := &Annotator{
+				Client: c,
+				Scheme: scheme,
+				Enumerator: MockEnumerator{Devices: []Device{{
+					PCIAddress:   testPCI,
+					VendorID:     tc.vendorID,
+					SerialNumber: testSerial,
+					ProductName:  tc.product,
+				}}},
+				NodeName: testNode,
+			}
+
+			if _, err := a.Reconcile(context.Background(), requestFor(dpu)); err != nil {
+				t.Fatal(err)
+			}
+
+			got := &unstructured.Unstructured{}
+			got.SetGroupVersionKind(DataProcessingUnitGVK)
+			if err := c.Get(context.Background(), types.NamespacedName{Name: testDPUName}, got); err != nil {
+				t.Fatal(err)
+			}
+			ann := got.GetAnnotations()
+			if ann[tc.wantKey] != testSerial {
+				t.Errorf("%s=%q, want %q", tc.wantKey, ann[tc.wantKey], testSerial)
+			}
+			for _, k := range allKeys {
+				if k != tc.wantKey && ann[k] != "" {
+					t.Errorf("stamped another vendor's key %s=%q", k, ann[k])
+				}
+			}
+		})
+	}
+}
+
+func TestAnnotatorRejectsUnsupportedVendor(t *testing.T) {
+	scheme := newDPUScheme(t)
+	dpu := newDPU(testDPUName, testNode)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dpu).Build()
+
+	a := &Annotator{
+		Client: c,
+		Scheme: scheme,
+		Enumerator: MockEnumerator{Devices: []Device{{
+			PCIAddress:   testPCI,
+			VendorID:     0x8086, // Intel: enumerable by nobody here
+			SerialNumber: testSerial,
+		}}},
+		NodeName: testNode,
+	}
+
+	_, err := a.Reconcile(context.Background(), requestFor(dpu))
+	if err == nil {
+		t.Fatal("expected an error rather than a silent NVIDIA-keyed annotation")
+	}
+	if !strings.Contains(err.Error(), "0x8086") {
+		t.Errorf("error should name the vendor, got: %v", err)
+	}
+
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(DataProcessingUnitGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: testDPUName}, got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.GetAnnotations()) != 0 {
+		t.Errorf("nothing should have been stamped, got %v", got.GetAnnotations())
+	}
+}
+
+// Each vendor's mapping document must read the key the annotator writes.
+func TestAMDMappingUsesAMDSerialAnnotationKey(t *testing.T) {
+	path := filepath.Join("..", "..", "config", "mappings", "amd-dsc200.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), AMDSerialNumberAnnotation) {
+		t.Errorf("amd-dsc200.yaml does not read %s", AMDSerialNumberAnnotation)
+	}
+	if strings.Contains(string(data), SerialNumberAnnotation) {
+		t.Errorf("amd-dsc200.yaml reads the NVIDIA key %s", SerialNumberAnnotation)
+	}
+}
+
 func TestMappingYAMLUsesDiscoveryAnnotationKeys(t *testing.T) {
 	path := filepath.Join("..", "..", "config", "mappings", "dataprocessingunit.yaml")
 	data, err := os.ReadFile(path)

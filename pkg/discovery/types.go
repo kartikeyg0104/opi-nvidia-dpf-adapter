@@ -43,6 +43,36 @@ const (
 	BFBNameAnnotation      = "dpu.nvidia.com/bfb"
 )
 
+// Per-vendor serial-number annotation keys. Each vendor's FieldMapping reads
+// its own key, so the annotator must stamp the one that matches the hardware
+// it found -- stamping the NVIDIA key on an AMD card leaves
+// config/mappings/amd-dsc200.yaml with no serial and fails its required field.
+const (
+	// AMDSerialNumberAnnotation is read by config/mappings/amd-dsc200.yaml.
+	AMDSerialNumberAnnotation = "dpu.amd.com/serial-number"
+	// MarvellSerialNumberAnnotation has no mapping document yet; Marvell
+	// integrates over VSP gRPC rather than CRs. The key is reserved so
+	// enumeration and annotation stay symmetric across supported vendors.
+	MarvellSerialNumberAnnotation = "dpu.marvell.com/serial-number"
+)
+
+// serialAnnotationByVendor maps a PCI vendor ID to the serial-number
+// annotation key that vendor's mapping reads.
+var serialAnnotationByVendor = map[uint16]string{
+	NVIDIAVendorID:  SerialNumberAnnotation,
+	AMDVendorID:     AMDSerialNumberAnnotation,
+	MarvellVendorID: MarvellSerialNumberAnnotation,
+}
+
+// SerialAnnotationFor returns the serial-number annotation key for a PCI
+// vendor, and whether that vendor is one the annotator can stamp. It
+// deliberately does not fall back to the NVIDIA key: silently labelling an
+// unknown card as NVIDIA is the bug this lookup exists to prevent.
+func SerialAnnotationFor(vendorID uint16) (string, bool) {
+	key, ok := serialAnnotationByVendor[vendorID]
+	return key, ok
+}
+
 // PCI vendor IDs of the DPU vendors this plugin can enumerate.
 //
 // Vendor alone is not a sufficient match for every vendor: see
