@@ -33,7 +33,7 @@ func TestPCIEnumeratorFindsBlueFieldFromSerialFile(t *testing.T) {
 		"serial": []byte("MTEXAMPLE0001\n"),
 	})
 	writePCIDevice(t, root, "0000:04:00.0", 0x8086, 0x1889, map[string][]byte{
-		"serial": []byte("intel-should-skip\n"),
+		"serial": []byte("intel-is-not-a-supported-vendor\n"),
 	})
 
 	got, err := PCIEnumerator{SysfsRoot: root}.Enumerate()
@@ -41,7 +41,7 @@ func TestPCIEnumeratorFindsBlueFieldFromSerialFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("got %d devices, want 1 (function 0 only, NVIDIA only)", len(got))
+		t.Fatalf("got %d devices, want 1 (function 0 only, supported vendors only)", len(got))
 	}
 	d := got[0]
 	if d.PCIAddress != "0000:03:00.0" {
@@ -95,6 +95,121 @@ func TestPCIEnumeratorReadsConfigDSN(t *testing.T) {
 	}
 	if got[0].ProductName != "BlueField" {
 		t.Errorf("unknown device id should fall back, got %s", got[0].ProductName)
+	}
+}
+
+func TestPCIEnumeratorFindsAMDPensando(t *testing.T) {
+	root := t.TempDir()
+	// dh1 shape: two DSC Ethernet Controllers plus the management
+	// controller, all function 0, all carrying the same board serial.
+	writePCIDevice(t, root, "0000:19:00.0", AMDVendorID, 0x1002, map[string][]byte{
+		"vpd": buildVPD("DSCEXAMPLE0001"),
+	})
+	writePCIDevice(t, root, "0000:1a:00.0", AMDVendorID, 0x1002, map[string][]byte{
+		"vpd": buildVPD("DSCEXAMPLE0001"),
+	})
+	writePCIDevice(t, root, "0000:1b:00.0", AMDVendorID, 0x1004, map[string][]byte{
+		"vpd": buildVPD("DSCEXAMPLE0001"),
+	})
+
+	got, err := PCIEnumerator{SysfsRoot: root}.Enumerate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d devices, want 3 AMD functions", len(got))
+	}
+	for _, d := range got {
+		if d.VendorID != AMDVendorID {
+			t.Errorf("%s vendor=%#x, want %#x", d.PCIAddress, d.VendorID, AMDVendorID)
+		}
+		if d.SerialNumber != "DSCEXAMPLE0001" {
+			t.Errorf("%s serial=%s", d.PCIAddress, d.SerialNumber)
+		}
+		if d.ProductName != productPensandoDSC {
+			t.Errorf("%s product=%s, want %s", d.PCIAddress, d.ProductName, productPensandoDSC)
+		}
+	}
+}
+
+// The DSC2-100 puts four PCI bridges behind vendor 0x1dd8. They have no VPD
+// serial, so a vendor-only match would abort the whole scan on real hardware.
+func TestPCIEnumeratorSkipsAMDBridgesWithoutSerial(t *testing.T) {
+	root := t.TempDir()
+	for _, addr := range []string{"0000:17:00.0", "0000:18:00.0", "0000:18:01.0", "0000:18:02.0"} {
+		writePCIDevice(t, root, addr, AMDVendorID, 0x1000, nil) // bridge, no serial
+	}
+	writePCIDevice(t, root, "0000:19:00.0", AMDVendorID, 0x1002, map[string][]byte{
+		"vpd": buildVPD("DSCEXAMPLE0001"),
+	})
+
+	got, err := PCIEnumerator{SysfsRoot: root}.Enumerate()
+	if err != nil {
+		t.Fatalf("bridges must not fail enumeration: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d devices, want only the Ethernet controller", len(got))
+	}
+	if got[0].PCIAddress != "0000:19:00.0" {
+		t.Errorf("pci=%s", got[0].PCIAddress)
+	}
+}
+
+func TestPCIEnumeratorFindsMarvell(t *testing.T) {
+	root := t.TempDir()
+	writePCIDevice(t, root, "0000:01:00.0", MarvellVendorID, 0xb900, map[string][]byte{
+		"serial": []byte("MRVL0000CN106\n"),
+	})
+
+	got, err := PCIEnumerator{SysfsRoot: root}.Enumerate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d devices, want 1", len(got))
+	}
+	if got[0].ProductName != productMarvellDPU || got[0].VendorID != MarvellVendorID {
+		t.Errorf("%+v", got[0])
+	}
+}
+
+// One host, three vendors: each card is found exactly once and named by its
+// own vendor. This is the property that makes the enumerator multi-vendor.
+func TestPCIEnumeratorMixedVendorBus(t *testing.T) {
+	root := t.TempDir()
+	writePCIDevice(t, root, "0000:03:00.0", NVIDIAVendorID, 0xa2dc, map[string][]byte{
+		"serial": []byte("MTEXAMPLE0001\n"),
+	})
+	writePCIDevice(t, root, "0000:19:00.0", AMDVendorID, 0x1002, map[string][]byte{
+		"vpd": buildVPD("DSCEXAMPLE0001"),
+	})
+	writePCIDevice(t, root, "0000:01:00.0", MarvellVendorID, 0xa0f7, map[string][]byte{
+		"serial": []byte("MRVL0000CN106\n"),
+	})
+	writePCIDevice(t, root, "0000:04:00.0", 0x8086, 0x1889, map[string][]byte{
+		"serial": []byte("intel-is-not-a-supported-vendor\n"),
+	})
+
+	got, err := PCIEnumerator{SysfsRoot: root}.Enumerate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byProduct := map[string]string{}
+	for _, d := range got {
+		byProduct[d.ProductName] = d.SerialNumber
+	}
+	want := map[string]string{
+		productBlueField3:  "MTEXAMPLE0001",
+		productPensandoDSC: "DSCEXAMPLE0001",
+		productMarvellDPU:  "MRVL0000CN106",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d devices, want %d: %+v", len(got), len(want), got)
+	}
+	for product, serial := range want {
+		if byProduct[product] != serial {
+			t.Errorf("%s serial=%q, want %q", product, byProduct[product], serial)
+		}
 	}
 }
 

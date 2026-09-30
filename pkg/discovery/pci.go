@@ -29,9 +29,11 @@ import (
 const defaultSysfsPCI = "/sys/bus/pci/devices"
 
 const (
-	productBlueField2 = "BlueField-2"
-	productBlueField3 = "BlueField-3"
-	productBlueField  = "BlueField"
+	productBlueField2  = "BlueField-2"
+	productBlueField3  = "BlueField-3"
+	productBlueField   = "BlueField"
+	productPensandoDSC = "Pensando DSC"
+	productMarvellDPU  = "Marvell DPU"
 )
 
 // PCIe Device Serial Number extended capability ID and config-space offset.
@@ -40,18 +42,73 @@ const (
 	pcieExtCapStart int    = 0x100
 )
 
-// Known BlueField device IDs (Mellanox/NVIDIA). Unknown 0x15b3 devices
-// still enumerate; ProductName falls back to productBlueField.
-var blueFieldDeviceNames = map[uint16]string{
-	0xa2d2: productBlueField2,
-	0xa2d6: productBlueField2,
-	0xa2dc: productBlueField3,
-	0xa2dd: productBlueField3,
+// vendorSpec describes one DPU vendor: which PCI device IDs are DPU
+// functions, and what to call them.
+type vendorSpec struct {
+	name     string
+	products map[uint16]string
+	// fallback names a device whose ID is not in products. An empty
+	// fallback means "skip unknown device IDs of this vendor".
+	fallback string
 }
 
-// PCIEnumerator scans sysfs for vendor 0x15b3 and reads the board serial,
-// matching Intel's GetDpuPcieAddress + ReadDeviceSerialNumber. SysfsRoot
-// is overridable so tests can mock /sys/bus/pci/devices without hardware.
+// productName returns the product for deviceID, or "" if this vendor does
+// not claim that device.
+func (v vendorSpec) productName(deviceID uint16) string {
+	if n, ok := v.products[deviceID]; ok {
+		return n
+	}
+	return v.fallback
+}
+
+// supportedVendors is the enumerator's whole notion of "is this a DPU".
+//
+// NVIDIA keeps a fallback: an unrecognised 0x15b3 device still enumerates as
+// a generic BlueField, which is the behaviour the annotator has always had.
+//
+// AMD and Marvell are deliberately strict. On lab host dh1 the AMD DSC2-100
+// puts four PCI *bridges* behind the same 0x1dd8 vendor (one Elba upstream
+// port and three virtual downstream ports) alongside the two Ethernet
+// controllers and the management controller. A bridge has no VPD serial, so
+// matching on vendor alone would make readSerial fail and abort enumeration
+// of the whole bus. Matching device IDs keeps bridges out entirely.
+var supportedVendors = map[uint16]vendorSpec{
+	NVIDIAVendorID: {
+		name: "NVIDIA",
+		products: map[uint16]string{
+			0xa2d2: productBlueField2,
+			0xa2d6: productBlueField2,
+			0xa2dc: productBlueField3,
+			0xa2dd: productBlueField3,
+		},
+		fallback: productBlueField,
+	},
+	AMDVendorID: {
+		name: "AMD Pensando",
+		products: map[uint16]string{
+			// dh1: 19:00.0 and 1a:00.0, "DSC Ethernet Controller".
+			0x1002: productPensandoDSC,
+			// dh1: 1b:00.0, "DSC Management Controller" -- the function
+			// lab/hardware/dh1/README.md binds with
+			// `echo "1dd8 1004" > /sys/bus/pci/drivers/ionic/new_id`.
+			0x1004: productPensandoDSC,
+		},
+	},
+	MarvellVendorID: {
+		name: "Marvell",
+		products: map[uint16]string{
+			// MrvlHostDeviceID / MrvlDPUdeviceID in openshift/dpu-operator
+			// internal/platform/marvell-dpu.go.
+			0xb900: productMarvellDPU,
+			0xa0f7: productMarvellDPU,
+		},
+	},
+}
+
+// PCIEnumerator scans sysfs for any supported DPU vendor and reads the board
+// serial, matching Intel's GetDpuPcieAddress + ReadDeviceSerialNumber.
+// SysfsRoot is overridable so tests can mock /sys/bus/pci/devices without
+// hardware.
 type PCIEnumerator struct {
 	SysfsRoot string
 }
@@ -81,17 +138,19 @@ func (p PCIEnumerator) Enumerate() ([]Device, error) {
 		if err != nil {
 			continue
 		}
-		if vendor != NVIDIAVendorID {
+		spec, ok := supportedVendors[vendor]
+		if !ok {
 			continue
 		}
 		deviceID, _ := readPCIID(filepath.Join(devDir, "device"))
+		name := spec.productName(deviceID)
+		if name == "" {
+			// Known vendor, but not a DPU function (e.g. an AMD PCI bridge).
+			continue
+		}
 		serial, err := readSerial(devDir)
 		if err != nil {
-			return nil, fmt.Errorf("nvidia device %s: %w", addr, err)
-		}
-		name := blueFieldDeviceNames[deviceID]
-		if name == "" {
-			name = productBlueField
+			return nil, fmt.Errorf("%s device %s: %w", spec.name, addr, err)
 		}
 		devices = append(devices, Device{
 			PCIAddress:   addr,

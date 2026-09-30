@@ -27,8 +27,8 @@ limitations under the License.
 // FieldMapping YAML can emit DPF objects with a real serialNumber.
 //
 // Enumerator is the Intel-shaped seam. MockEnumerator is for kind/local
-// e2e. PCIEnumerator scans sysfs for vendor 0x15b3 without changing the
-// annotator or the mapping YAML.
+// e2e. PCIEnumerator scans sysfs for any supported DPU vendor (NVIDIA,
+// AMD Pensando, Marvell) without changing the annotator or the mapping YAML.
 package discovery
 
 import "k8s.io/apimachinery/pkg/runtime/schema"
@@ -43,8 +43,21 @@ const (
 	BFBNameAnnotation      = "dpu.nvidia.com/bfb"
 )
 
-// NVIDIAVendorID is Mellanox/NVIDIA PCI vendor 0x15b3.
-const NVIDIAVendorID uint16 = 0x15b3
+// PCI vendor IDs of the DPU vendors this plugin can enumerate.
+//
+// Vendor alone is not a sufficient match for every vendor: see
+// supportedVendors in pci.go, which pairs each vendor with the device IDs
+// that are actually DPU functions.
+const (
+	// NVIDIAVendorID is Mellanox/NVIDIA, the BlueField vendor.
+	NVIDIAVendorID uint16 = 0x15b3
+	// AMDVendorID is AMD Pensando, the DSC/Elba vendor. Observed on lab
+	// host dh1 (DSC2-100, ionic driver).
+	AMDVendorID uint16 = 0x1dd8
+	// MarvellVendorID is Marvell/Cavium, the OCTEON vendor. Matches
+	// MrvlVendorID in openshift/dpu-operator internal/platform/marvell-dpu.go.
+	MarvellVendorID uint16 = 0x177d
+)
 
 // DataProcessingUnitGVK is the cluster-scoped OPI CR the annotator patches.
 var DataProcessingUnitGVK = schema.GroupVersionKind{
@@ -53,7 +66,7 @@ var DataProcessingUnitGVK = schema.GroupVersionKind{
 	Kind:    "DataProcessingUnit",
 }
 
-// Device is one BlueField function discovered on the node.
+// Device is one DPU function discovered on the node.
 type Device struct {
 	PCIAddress   string
 	VendorID     uint16
@@ -62,7 +75,7 @@ type Device struct {
 	ProductName  string
 }
 
-// Enumerator finds NVIDIA DPUs on this node. Intel's equivalent is
+// Enumerator finds DPUs on this node. Intel's equivalent is
 // platform.PciDevices() + ReadDeviceSerialNumber.
 type Enumerator interface {
 	Enumerate() ([]Device, error)
