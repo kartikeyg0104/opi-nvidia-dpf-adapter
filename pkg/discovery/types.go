@@ -31,7 +31,13 @@ limitations under the License.
 // AMD Pensando, Marvell) without changing the annotator or the mapping YAML.
 package discovery
 
-import "k8s.io/apimachinery/pkg/runtime/schema"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
 
 // Annotation keys the FieldMapping YAML already consumes. Changing a
 // value here without updating config/mappings/dataprocessingunit.yaml
@@ -42,36 +48,6 @@ const (
 	FlavorAnnotation       = "dpu.nvidia.com/flavor"
 	BFBNameAnnotation      = "dpu.nvidia.com/bfb"
 )
-
-// Per-vendor serial-number annotation keys. Each vendor's FieldMapping reads
-// its own key, so the annotator must stamp the one that matches the hardware
-// it found -- stamping the NVIDIA key on an AMD card leaves
-// config/mappings/amd-dsc200.yaml with no serial and fails its required field.
-const (
-	// AMDSerialNumberAnnotation is read by config/mappings/amd-dsc200.yaml.
-	AMDSerialNumberAnnotation = "dpu.amd.com/serial-number"
-	// MarvellSerialNumberAnnotation has no mapping document yet; Marvell
-	// integrates over VSP gRPC rather than CRs. The key is reserved so
-	// enumeration and annotation stay symmetric across supported vendors.
-	MarvellSerialNumberAnnotation = "dpu.marvell.com/serial-number"
-)
-
-// serialAnnotationByVendor maps a PCI vendor ID to the serial-number
-// annotation key that vendor's mapping reads.
-var serialAnnotationByVendor = map[uint16]string{
-	NVIDIAVendorID:  SerialNumberAnnotation,
-	AMDVendorID:     AMDSerialNumberAnnotation,
-	MarvellVendorID: MarvellSerialNumberAnnotation,
-}
-
-// SerialAnnotationFor returns the serial-number annotation key for a PCI
-// vendor, and whether that vendor is one the annotator can stamp. It
-// deliberately does not fall back to the NVIDIA key: silently labelling an
-// unknown card as NVIDIA is the bug this lookup exists to prevent.
-func SerialAnnotationFor(vendorID uint16) (string, bool) {
-	key, ok := serialAnnotationByVendor[vendorID]
-	return key, ok
-}
 
 // PCI vendor IDs of the DPU vendors this plugin can enumerate.
 //
@@ -88,6 +64,110 @@ const (
 	// MrvlVendorID in openshift/dpu-operator internal/platform/marvell-dpu.go.
 	MarvellVendorID uint16 = 0x177d
 )
+
+// Per-vendor annotation keys. Every vendor's FieldMapping expresses the same
+// four concepts, but spells them differently, so the annotator must stamp the
+// set that matches the hardware it found. Stamping the NVIDIA keys on an AMD
+// card leaves config/mappings/amd-dsc200.yaml with no serial and no firmware
+// URL, and both of those are `required: true`.
+const (
+	// AMD keys, read by config/mappings/amd-dsc200.yaml.
+	AMDSerialNumberAnnotation = "dpu.amd.com/serial-number"
+	AMDFirmwareURLAnnotation  = "dpu.amd.com/firmware-url"
+	AMDProfileAnnotation      = "dpu.amd.com/profile"
+	AMDFirmwareNameAnnotation = "dpu.amd.com/firmware"
+)
+
+// Marvell keys are RESERVED, not verified. Marvell integrates with the DPU
+// Operator over VSP gRPC rather than CRs, so no mapping document reads these
+// yet; they exist so enumeration and annotation stay symmetric across every
+// vendor pkg/discovery can detect. Revisit the spelling when a Marvell
+// FieldMapping lands -- nothing depends on these strings today.
+const (
+	MarvellSerialNumberAnnotation = "dpu.marvell.com/serial-number"
+	MarvellFirmwareURLAnnotation  = "dpu.marvell.com/firmware-url"
+	MarvellFlavorAnnotation       = "dpu.marvell.com/flavor"
+	MarvellFirmwareNameAnnotation = "dpu.marvell.com/firmware"
+)
+
+// VendorAnnotations is the annotation key set one vendor's FieldMapping reads.
+// The fields are the concepts; the values are that vendor's spelling of them.
+type VendorAnnotations struct {
+	// Serial is the board serial number. Every mapping requires it.
+	Serial string
+	// FirmwareURL is where the firmware bundle is fetched from.
+	// NVIDIA calls it the BFB URL; AMD calls it the DSC firmware URL.
+	FirmwareURL string
+	// Flavor is the provisioning profile. NVIDIA: DPUFlavor. AMD: DSCProfile.
+	Flavor string
+	// FirmwareName is the name of the firmware CR to reference.
+	// NVIDIA: the BFB object. AMD: the DSCFirmware object.
+	FirmwareName string
+}
+
+var annotationsByVendor = map[uint16]VendorAnnotations{
+	NVIDIAVendorID: {
+		Serial:       SerialNumberAnnotation,
+		FirmwareURL:  BFBURLAnnotation,
+		Flavor:       FlavorAnnotation,
+		FirmwareName: BFBNameAnnotation,
+	},
+	AMDVendorID: {
+		Serial:       AMDSerialNumberAnnotation,
+		FirmwareURL:  AMDFirmwareURLAnnotation,
+		Flavor:       AMDProfileAnnotation,
+		FirmwareName: AMDFirmwareNameAnnotation,
+	},
+	MarvellVendorID: {
+		Serial:       MarvellSerialNumberAnnotation,
+		FirmwareURL:  MarvellFirmwareURLAnnotation,
+		Flavor:       MarvellFlavorAnnotation,
+		FirmwareName: MarvellFirmwareNameAnnotation,
+	},
+}
+
+// AnnotationsFor returns the annotation key set for a PCI vendor, and whether
+// that vendor is one the annotator can stamp. It deliberately does not fall
+// back to the NVIDIA keys: silently labelling an unknown card as NVIDIA is the
+// bug this lookup exists to prevent.
+func AnnotationsFor(vendorID uint16) (VendorAnnotations, bool) {
+	keys, ok := annotationsByVendor[vendorID]
+	return keys, ok
+}
+
+// Canonical --vendor spellings. Also the names AnnotationsFor's callers log.
+const (
+	VendorNVIDIA  = "nvidia"
+	VendorAMD     = "amd"
+	VendorMarvell = "marvell"
+)
+
+// vendorNames maps the --vendor flag spelling to a PCI vendor ID. The extra
+// aliases are the names people actually say for these cards.
+var vendorNames = map[string]uint16{
+	VendorNVIDIA:  NVIDIAVendorID,
+	"bluefield":   NVIDIAVendorID,
+	VendorAMD:     AMDVendorID,
+	"pensando":    AMDVendorID,
+	VendorMarvell: MarvellVendorID,
+	"octeon":      MarvellVendorID,
+}
+
+// ParseVendor resolves a vendor name ("amd") or hex PCI id ("0x1dd8") to a
+// vendor ID, so mock mode can rehearse any supported vendor without hardware.
+func ParseVendor(s string) (uint16, error) {
+	key := strings.ToLower(strings.TrimSpace(s))
+	if id, ok := vendorNames[key]; ok {
+		return id, nil
+	}
+	if v, err := strconv.ParseUint(strings.TrimPrefix(key, "0x"), 16, 16); err == nil {
+		if _, ok := annotationsByVendor[uint16(v)]; ok {
+			return uint16(v), nil
+		}
+		return 0, fmt.Errorf("vendor %s is not a supported DPU vendor", s)
+	}
+	return 0, fmt.Errorf("unknown vendor %q: want nvidia, amd, marvell, or a hex PCI id", s)
+}
 
 // DataProcessingUnitGVK is the cluster-scoped OPI CR the annotator patches.
 var DataProcessingUnitGVK = schema.GroupVersionKind{

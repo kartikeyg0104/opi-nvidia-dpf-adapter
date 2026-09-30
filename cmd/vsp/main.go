@@ -22,6 +22,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -58,8 +59,11 @@ func main() {
 		serialNumber string
 		pciAddress   string
 		productName  string
+		vendorName   string
+		firmwareURL  string
 		bfbURL       string
 		flavor       string
+		firmwareName string
 		bfbName      string
 		usePCI       bool
 		grpcSocket   string
@@ -70,13 +74,26 @@ func main() {
 	flag.StringVar(&nodeName, "node-name", os.Getenv("NODE_NAME"),
 		"only stamp DataProcessingUnits whose spec.nodeName matches")
 	flag.StringVar(&serialNumber, "serial-number", os.Getenv("DPU_SERIAL_NUMBER"),
-		"mock BlueField serial (required unless --pci)")
+		"mock DPU board serial (required unless --pci)")
 	flag.StringVar(&pciAddress, "pci-address", "0000:03:00.0", "mock PCI address recorded in logs")
-	flag.StringVar(&productName, "product-name", "BlueField-3", "mock DPU product name")
-	flag.StringVar(&bfbURL, "bfb-url", os.Getenv("DPU_BFB_URL"), "optional BFB URL annotation")
-	flag.StringVar(&flavor, "flavor", "", "optional dpu.nvidia.com/flavor annotation")
-	flag.StringVar(&bfbName, "bfb-name", "", "optional dpu.nvidia.com/bfb annotation")
-	flag.BoolVar(&usePCI, "pci", false, "scan sysfs for vendor 0x15b3 instead of using --serial-number")
+	flag.StringVar(&productName, "product-name", "",
+		"mock DPU product name; defaults to the --vendor card")
+	flag.StringVar(&vendorName, "vendor", os.Getenv("DPU_VENDOR"),
+		"mock DPU vendor: nvidia, amd, marvell, or a hex PCI id (default nvidia). "+
+			"Selects which vendor's annotation keys are stamped")
+	// Annotation VALUES. The key each is written under is chosen per vendor,
+	// so one flag serves a BlueField BFB URL and a DSC firmware URL.
+	flag.StringVar(&firmwareURL, "firmware-url", os.Getenv("DPU_FIRMWARE_URL"),
+		"optional firmware bundle URL annotation (NVIDIA: BFB, AMD: DSC firmware)")
+	flag.StringVar(&bfbURL, "bfb-url", os.Getenv("DPU_BFB_URL"),
+		"deprecated alias for --firmware-url")
+	flag.StringVar(&flavor, "flavor", "",
+		"optional provisioning flavor annotation (NVIDIA: DPUFlavor, AMD: DSCProfile)")
+	flag.StringVar(&firmwareName, "firmware-name", "",
+		"optional firmware CR name annotation (NVIDIA: BFB, AMD: DSCFirmware)")
+	flag.StringVar(&bfbName, "bfb-name", "", "deprecated alias for --firmware-name")
+	flag.BoolVar(&usePCI, "pci", false,
+		"scan sysfs for any supported DPU vendor instead of using --serial-number")
 	flag.StringVar(&grpcSocket, "grpc-socket", vsp.DefaultSocket,
 		"unix socket the dpu-operator daemon dials")
 	flag.BoolVar(&grpcOnly, "grpc-only", false,
@@ -87,6 +104,21 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// Deprecated aliases lose to the new names when both are given, so the
+	// daemonset's DPU_BFB_URL and the README's --bfb-url keep working.
+	firmwareURL = firstNonEmpty(firmwareURL, bfbURL)
+	firmwareName = firstNonEmpty(firmwareName, bfbName)
+
+	vendorID := discovery.NVIDIAVendorID
+	if vendorName != "" {
+		id, err := discovery.ParseVendor(vendorName)
+		if err != nil {
+			setupLog.Error(err, "invalid --vendor")
+			os.Exit(1)
+		}
+		vendorID = id
+	}
+
 	var enumerator discovery.Enumerator
 	if usePCI {
 		enumerator = discovery.PCIEnumerator{}
@@ -95,13 +127,17 @@ func main() {
 			setupLog.Info("either --serial-number or --pci is required")
 			os.Exit(1)
 		}
-		enumerator = discovery.MockEnumerator{
-			Devices: []discovery.Device{discovery.StaticDevice(serialNumber, pciAddress, productName)},
-		}
+		dev := discovery.StaticDevice(vendorID, serialNumber, pciAddress, productName)
+		enumerator = discovery.MockEnumerator{Devices: []discovery.Device{dev}}
+		// Report the device as built, not the vendor default: an explicit
+		// --product-name must show up here or the log lies about the fixture.
+		setupLog.Info("mock hardware",
+			"vendor", vendorName, "vendorID", fmt.Sprintf("%#04x", dev.VendorID),
+			"product", dev.ProductName, "serial", dev.SerialNumber, "pci", dev.PCIAddress)
 	}
 
 	if grpcOnly {
-		setupLog.Info("starting NVIDIA VSP gRPC only", "socket", grpcSocket, "pci-mode", usePCI)
+		setupLog.Info("starting VSP gRPC only", "socket", grpcSocket, "pci-mode", usePCI)
 		if err := vsp.NewServer(enumerator, grpcSocket).Start(ctrl.SetupSignalHandler()); err != nil {
 			setupLog.Error(err, "vendor plugin gRPC server exited")
 			os.Exit(1)
@@ -123,13 +159,13 @@ func main() {
 	}
 
 	ann := &discovery.Annotator{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Enumerator: enumerator,
-		NodeName:   nodeName,
-		BFBURL:     bfbURL,
-		Flavor:     flavor,
-		BFBName:    bfbName,
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Enumerator:   enumerator,
+		NodeName:     nodeName,
+		FirmwareURL:  firmwareURL,
+		Flavor:       flavor,
+		FirmwareName: firmwareName,
 	}
 	if err := ann.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create hardware-discovery controller")
@@ -161,4 +197,15 @@ func registerUnstructured(s *runtime.Scheme, gvk schema.GroupVersionKind) {
 	s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
 	metav1.AddToGroupVersion(s, gvk.GroupVersion())
+}
+
+// firstNonEmpty resolves a flag against its deprecated alias: the new name
+// wins, the old name still works. config/vsp/daemonset.yaml sets DPU_BFB_URL
+// and README documents --bfb-url, so dropping the fallback would silently
+// stop stamping the firmware URL.
+func firstNonEmpty(preferred, fallback string) string {
+	if preferred != "" {
+		return preferred
+	}
+	return fallback
 }

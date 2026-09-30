@@ -105,7 +105,7 @@ func startTestServer(t *testing.T) (context.Context, *grpc.ClientConn, chan erro
 	t.Cleanup(func() { _ = os.Remove(sock) })
 	enum := discovery.MockEnumerator{
 		Devices: []discovery.Device{
-			discovery.StaticDevice("MTEXAMPLE0001", "0000:03:00.0", "BlueField-3"),
+			discovery.StaticDevice(discovery.NVIDIAVendorID, "MTEXAMPLE0001", "0000:03:00.0", "BlueField-3"),
 		},
 	}
 	srv := NewServer(enum, sock)

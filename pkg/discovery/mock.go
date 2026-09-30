@@ -29,11 +29,17 @@ func (m MockEnumerator) Enumerate() ([]Device, error) {
 	return out, nil
 }
 
-// StaticDevice builds the one-DPU fixture local e2e uses.
-func StaticDevice(serial, pci, product string) Device {
+// StaticDevice builds the one-DPU fixture local e2e uses. vendorID picks
+// which vendor is being rehearsed, so mock mode can exercise the AMD and
+// Marvell annotation paths on a laptop with no card on the bus. An empty
+// product falls back to that vendor's usual product name.
+func StaticDevice(vendorID uint16, serial, pci, product string) Device {
+	if product == "" {
+		product = DefaultProductName(vendorID)
+	}
 	return Device{
 		PCIAddress:   pci,
-		VendorID:     NVIDIAVendorID,
+		VendorID:     vendorID,
 		SerialNumber: serial,
 		ProductName:  product,
 	}

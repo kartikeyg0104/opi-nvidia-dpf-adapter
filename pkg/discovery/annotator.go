@@ -38,9 +38,12 @@ type Annotator struct {
 	Scheme     *runtime.Scheme
 	Enumerator Enumerator
 	NodeName   string
-	BFBURL     string
-	Flavor     string
-	BFBName    string
+	// FirmwareURL, Flavor and FirmwareName are vendor-neutral VALUES. The
+	// annotation KEY each one is written under is chosen per vendor from
+	// AnnotationsFor, so the same operand serves a BlueField and a DSC.
+	FirmwareURL  string
+	Flavor       string
+	FirmwareName string
 }
 
 func (a *Annotator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -76,26 +79,27 @@ func (a *Annotator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 		return ctrl.Result{}, fmt.Errorf("discovered device %s has empty serial number", dev.PCIAddress)
 	}
 
-	// The serial key is chosen by the hardware, not by this binary: an AMD
-	// card must be stamped with dpu.amd.com/serial-number, because that is
-	// what config/mappings/amd-dsc200.yaml reads.
-	serialKey, ok := SerialAnnotationFor(dev.VendorID)
+	// The keys are chosen by the hardware, not by this binary: an AMD card
+	// must be stamped with dpu.amd.com/serial-number and
+	// dpu.amd.com/firmware-url, because that is what
+	// config/mappings/amd-dsc200.yaml reads -- and both are required there.
+	keys, ok := AnnotationsFor(dev.VendorID)
 	if !ok {
 		return ctrl.Result{}, fmt.Errorf(
-			"device %s: no serial annotation key for PCI vendor %#04x", dev.PCIAddress, dev.VendorID)
+			"device %s: no annotation keys for PCI vendor %#04x", dev.PCIAddress, dev.VendorID)
 	}
 
 	desired := map[string]string{
-		serialKey: dev.SerialNumber,
+		keys.Serial: dev.SerialNumber,
 	}
-	if a.BFBURL != "" {
-		desired[BFBURLAnnotation] = a.BFBURL
+	if a.FirmwareURL != "" {
+		desired[keys.FirmwareURL] = a.FirmwareURL
 	}
 	if a.Flavor != "" {
-		desired[FlavorAnnotation] = a.Flavor
+		desired[keys.Flavor] = a.Flavor
 	}
-	if a.BFBName != "" {
-		desired[BFBNameAnnotation] = a.BFBName
+	if a.FirmwareName != "" {
+		desired[keys.FirmwareName] = a.FirmwareName
 	}
 
 	if annotationsMatch(dpu.GetAnnotations(), desired) {
@@ -116,7 +120,7 @@ func (a *Annotator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	log.Info("stamped hardware identity",
 		"dpu", dpu.GetName(),
 		"serial", dev.SerialNumber,
-		"serialKey", serialKey,
+		"serialKey", keys.Serial,
 		"product", dev.ProductName,
 		"pci", dev.PCIAddress,
 		"node", node)

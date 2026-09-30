@@ -32,16 +32,18 @@ import (
 )
 
 const (
-	testNode    = "kind-worker"
-	testSerial  = "MTEXAMPLE0001"
-	testPCI     = "0000:03:00.0"
-	testProduct = productBlueField3
-	testDPUName = "bf3-worker"
-	testBFBURL  = "https://example.invalid/fw.bfb"
+	testNode         = "kind-worker"
+	testSerial       = "MTEXAMPLE0001"
+	testPCI          = "0000:03:00.0"
+	testProduct      = productBlueField3
+	testDPUName      = "bf3-worker"
+	testBFBURL       = "https://example.invalid/fw.bfb"
+	testFlavor       = "test-flavor"
+	testFirmwareName = "test-firmware"
 )
 
 func mockDevices() MockEnumerator {
-	return MockEnumerator{Devices: []Device{StaticDevice(testSerial, testPCI, testProduct)}}
+	return MockEnumerator{Devices: []Device{StaticDevice(NVIDIAVendorID, testSerial, testPCI, testProduct)}}
 }
 
 func TestAnnotatorStampsSerialOnMatchingNode(t *testing.T) {
@@ -50,11 +52,11 @@ func TestAnnotatorStampsSerialOnMatchingNode(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dpu).Build()
 
 	a := &Annotator{
-		Client:     c,
-		Scheme:     scheme,
-		Enumerator: mockDevices(),
-		NodeName:   testNode,
-		BFBURL:     testBFBURL,
+		Client:      c,
+		Scheme:      scheme,
+		Enumerator:  mockDevices(),
+		NodeName:    testNode,
+		FirmwareURL: testBFBURL,
 	}
 
 	if _, err := a.Reconcile(context.Background(), requestFor(dpu)); err != nil {
@@ -143,13 +145,22 @@ func TestAnnotatorStampsVendorSpecificSerialKey(t *testing.T) {
 		name     string
 		vendorID uint16
 		product  string
-		wantKey  string
+		want     VendorAnnotations
 	}{
-		{"nvidia", NVIDIAVendorID, productBlueField3, SerialNumberAnnotation},
-		{"amd", AMDVendorID, productPensandoDSC, AMDSerialNumberAnnotation},
-		{"marvell", MarvellVendorID, productMarvellDPU, MarvellSerialNumberAnnotation},
+		{VendorNVIDIA, NVIDIAVendorID, productBlueField3, VendorAnnotations{
+			SerialNumberAnnotation, BFBURLAnnotation, FlavorAnnotation, BFBNameAnnotation}},
+		{VendorAMD, AMDVendorID, productPensandoDSC, VendorAnnotations{
+			AMDSerialNumberAnnotation, AMDFirmwareURLAnnotation,
+			AMDProfileAnnotation, AMDFirmwareNameAnnotation}},
+		{VendorMarvell, MarvellVendorID, productMarvellDPU, VendorAnnotations{
+			MarvellSerialNumberAnnotation, MarvellFirmwareURLAnnotation,
+			MarvellFlavorAnnotation, MarvellFirmwareNameAnnotation}},
 	}
-	allKeys := []string{SerialNumberAnnotation, AMDSerialNumberAnnotation, MarvellSerialNumberAnnotation}
+	// Every key any vendor could write, so a case can assert the others stayed off.
+	allKeys := make([]string, 0, 4*len(annotationsByVendor))
+	for _, v := range annotationsByVendor {
+		allKeys = append(allKeys, v.Serial, v.FirmwareURL, v.Flavor, v.FirmwareName)
+	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,13 +171,13 @@ func TestAnnotatorStampsVendorSpecificSerialKey(t *testing.T) {
 			a := &Annotator{
 				Client: c,
 				Scheme: scheme,
-				Enumerator: MockEnumerator{Devices: []Device{{
-					PCIAddress:   testPCI,
-					VendorID:     tc.vendorID,
-					SerialNumber: testSerial,
-					ProductName:  tc.product,
-				}}},
-				NodeName: testNode,
+				Enumerator: MockEnumerator{Devices: []Device{
+					StaticDevice(tc.vendorID, testSerial, testPCI, tc.product),
+				}},
+				NodeName:     testNode,
+				FirmwareURL:  testBFBURL,
+				Flavor:       testFlavor,
+				FirmwareName: testFirmwareName,
 			}
 
 			if _, err := a.Reconcile(context.Background(), requestFor(dpu)); err != nil {
@@ -179,11 +190,19 @@ func TestAnnotatorStampsVendorSpecificSerialKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			ann := got.GetAnnotations()
-			if ann[tc.wantKey] != testSerial {
-				t.Errorf("%s=%q, want %q", tc.wantKey, ann[tc.wantKey], testSerial)
+			mine := map[string]string{
+				tc.want.Serial:       testSerial,
+				tc.want.FirmwareURL:  testBFBURL,
+				tc.want.Flavor:       testFlavor,
+				tc.want.FirmwareName: testFirmwareName,
+			}
+			for key, want := range mine {
+				if ann[key] != want {
+					t.Errorf("%s=%q, want %q", key, ann[key], want)
+				}
 			}
 			for _, k := range allKeys {
-				if k != tc.wantKey && ann[k] != "" {
+				if _, isMine := mine[k]; !isMine && ann[k] != "" {
 					t.Errorf("stamped another vendor's key %s=%q", k, ann[k])
 				}
 			}
@@ -225,33 +244,130 @@ func TestAnnotatorRejectsUnsupportedVendor(t *testing.T) {
 	}
 }
 
-// Each vendor's mapping document must read the key the annotator writes.
-func TestAMDMappingUsesAMDSerialAnnotationKey(t *testing.T) {
-	path := filepath.Join("..", "..", "config", "mappings", "amd-dsc200.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+// The annotator and the mapping documents must agree on every key, in both
+// directions: a mapping must read all four of its vendor's keys, and must not
+// read any other vendor's. This is the invariant that broke twice -- first the
+// serial key, then the firmware URL -- each time silently, because the mapping
+// simply saw an absent annotation.
+func TestMappingYAMLsMatchVendorAnnotationKeys(t *testing.T) {
+	cases := []struct {
+		vendor   string
+		vendorID uint16
+		file     string
+	}{
+		{VendorNVIDIA, NVIDIAVendorID, "dataprocessingunit.yaml"},
+		{VendorAMD, AMDVendorID, "amd-dsc200.yaml"},
+		// Marvell has no mapping document: it integrates over VSP gRPC, not
+		// CRs. Its reserved keys are asserted unused below instead.
 	}
-	if !strings.Contains(string(data), AMDSerialNumberAnnotation) {
-		t.Errorf("amd-dsc200.yaml does not read %s", AMDSerialNumberAnnotation)
-	}
-	if strings.Contains(string(data), SerialNumberAnnotation) {
-		t.Errorf("amd-dsc200.yaml reads the NVIDIA key %s", SerialNumberAnnotation)
+
+	for _, tc := range cases {
+		t.Run(tc.vendor, func(t *testing.T) {
+			body := readMapping(t, tc.file)
+			keys, ok := AnnotationsFor(tc.vendorID)
+			if !ok {
+				t.Fatalf("no annotation keys for vendor %#04x", tc.vendorID)
+			}
+			for _, k := range []string{keys.Serial, keys.FirmwareURL, keys.Flavor, keys.FirmwareName} {
+				if !strings.Contains(body, k) {
+					t.Errorf("%s does not read %s", tc.file, k)
+				}
+			}
+			for otherID, other := range annotationsByVendor {
+				if otherID == tc.vendorID {
+					continue
+				}
+				for _, k := range []string{other.Serial, other.FirmwareURL, other.Flavor, other.FirmwareName} {
+					if strings.Contains(body, k) {
+						t.Errorf("%s reads another vendor's key %s", tc.file, k)
+					}
+				}
+			}
+		})
 	}
 }
 
-func TestMappingYAMLUsesDiscoveryAnnotationKeys(t *testing.T) {
-	path := filepath.Join("..", "..", "config", "mappings", "dataprocessingunit.yaml")
-	data, err := os.ReadFile(path)
+// Marvell's keys are reserved, not wired. If a Marvell mapping ever lands,
+// this test fails and whoever adds it moves Marvell into the table above.
+func TestMarvellKeysAreStillUnused(t *testing.T) {
+	keys, _ := AnnotationsFor(MarvellVendorID)
+	for _, f := range []string{"dataprocessingunit.yaml", "amd-dsc200.yaml", "servicefunctionchain.yaml"} {
+		body := readMapping(t, f)
+		for _, k := range []string{keys.Serial, keys.FirmwareURL, keys.Flavor, keys.FirmwareName} {
+			if strings.Contains(body, k) {
+				t.Errorf("%s reads reserved Marvell key %s; add Marvell to "+
+					"TestMappingYAMLsMatchVendorAnnotationKeys", f, k)
+			}
+		}
+	}
+}
+
+func TestParseVendor(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    uint16
+		wantErr bool
+	}{
+		{VendorNVIDIA, NVIDIAVendorID, false},
+		{"NVIDIA", NVIDIAVendorID, false},
+		{VendorAMD, AMDVendorID, false},
+		{"pensando", AMDVendorID, false},
+		{VendorMarvell, MarvellVendorID, false},
+		{"0x1dd8", AMDVendorID, false},
+		{"1dd8", AMDVendorID, false},
+		{"0x8086", 0, true}, // valid hex, unsupported vendor
+		{"intel", 0, true},
+		{"", 0, true},
+	} {
+		got, err := ParseVendor(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseVendor(%q) = %#04x, want error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseVendor(%q): %v", tc.in, err)
+		} else if got != tc.want {
+			t.Errorf("ParseVendor(%q) = %#04x, want %#04x", tc.in, got, tc.want)
+		}
+	}
+}
+
+// Mock mode must produce a device the annotator can key off, so a laptop can
+// rehearse the AMD path with no card on the bus.
+func TestStaticDeviceCarriesVendorAndDefaultProduct(t *testing.T) {
+	for _, tc := range []struct {
+		vendorID    uint16
+		wantProduct string
+	}{
+		{NVIDIAVendorID, productBlueField3},
+		{AMDVendorID, productPensandoDSC},
+		{MarvellVendorID, productMarvellDPU},
+	} {
+		d := StaticDevice(tc.vendorID, testSerial, testPCI, "")
+		if d.VendorID != tc.vendorID {
+			t.Errorf("vendor=%#04x, want %#04x", d.VendorID, tc.vendorID)
+		}
+		if d.ProductName != tc.wantProduct {
+			t.Errorf("product=%q, want %q", d.ProductName, tc.wantProduct)
+		}
+		if _, ok := AnnotationsFor(d.VendorID); !ok {
+			t.Errorf("mock device for %#04x has no annotation keys", tc.vendorID)
+		}
+	}
+	if d := StaticDevice(AMDVendorID, testSerial, testPCI, "Custom"); d.ProductName != "Custom" {
+		t.Errorf("explicit product should win, got %q", d.ProductName)
+	}
+}
+
+func readMapping(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "config", "mappings", name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := string(data)
-	for _, key := range []string{SerialNumberAnnotation, BFBURLAnnotation, FlavorAnnotation, BFBNameAnnotation} {
-		if !strings.Contains(body, key) {
-			t.Errorf("mapping YAML missing annotation key %s", key)
-		}
-	}
+	return string(data)
 }
 
 func newDPUScheme(t *testing.T) *runtime.Scheme {

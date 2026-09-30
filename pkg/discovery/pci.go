@@ -105,6 +105,21 @@ var supportedVendors = map[uint16]vendorSpec{
 	},
 }
 
+// defaultProductNames is what mock mode calls each vendor's card when no
+// product name is given. These are the concrete models in the OPI lab rather
+// than the generic fallbacks used for an unrecognised device ID.
+var defaultProductNames = map[uint16]string{
+	NVIDIAVendorID:  productBlueField3,
+	AMDVendorID:     productPensandoDSC,
+	MarvellVendorID: productMarvellDPU,
+}
+
+// DefaultProductName returns the usual product name for a vendor, or "" if
+// the vendor is not one this package enumerates.
+func DefaultProductName(vendorID uint16) string {
+	return defaultProductNames[vendorID]
+}
+
 // PCIEnumerator scans sysfs for any supported DPU vendor and reads the board
 // serial, matching Intel's GetDpuPcieAddress + ReadDeviceSerialNumber.
 // SysfsRoot is overridable so tests can mock /sys/bus/pci/devices without

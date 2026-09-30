@@ -141,8 +141,23 @@ Local mock (no BlueField):
 go run ./cmd/vsp --metrics-bind-address=0 \
   --node-name=kind-worker \
   --serial-number=MTEXAMPLE0001 \
-  --bfb-url=https://example.invalid/fw.bfb
+  --firmware-url=https://example.invalid/fw.bfb
 ```
+
+`--vendor` rehearses another vendor's annotation keys with no card on the bus.
+The keys follow the hardware, so an AMD mock stamps `dpu.amd.com/serial-number`
+and `dpu.amd.com/firmware-url`, which is what `config/mappings/amd-dsc200.yaml`
+reads:
+
+```sh
+go run ./cmd/vsp --metrics-bind-address=0 \
+  --node-name=dh1 --vendor=amd \
+  --serial-number=DSCEXAMPLE0001 \
+  --firmware-url=https://example.invalid/dsc/1.46.0-E-28.tar
+```
+
+`--firmware-url` and `--firmware-name` replace `--bfb-url` and `--bfb-name`,
+which still work as deprecated aliases.
 
 gRPC only, no kubeconfig (macOS cannot bind `/var/run`):
 
