@@ -10,18 +10,34 @@ shape mismatches and one broken vendor guard that nothing in the repo warned
 about. Those lessons are now baked into the template rather than written down
 and hoped for.
 
-## The five touchpoints
+## The four touchpoints
 
-Onboarding one vendor touches five things. Four are data; exactly one is Go, and
-it is a comment.
+Onboarding one vendor touches four things. Three are data; the only production
+Go is an optional table entry, and only if the VSP has to stamp serials.
 
 | # | What | Where | Data or Go |
 | --- | --- | --- | --- |
 | 1 | The field mapping | `config/mappings/<vendor>.yaml` | data |
 | 2 | The vendor's CRD schemas | `test/conformance/crds/<vendor>/` | data |
 | 3 | A conformance case row | `test/conformance/conformance_test.go` | Go (test only) |
-| 4 | RBAC for the new API group | `pkg/translation/translation_controller.go` | Go (a marker comment) |
-| 5 | PCI enumeration, *if* the VSP must stamp serials | `pkg/discovery/pci.go`, `types.go` | Go (a table entry) |
+| 4 | PCI enumeration, *if* the VSP must stamp serials | `pkg/discovery/pci.go`, `types.go` | Go (a table entry) |
+
+**RBAC used to be on this list and no longer is.** `controller-gen` builds the
+ClusterRole from marker comments, so a new API group meant hand-editing a comment
+in `pkg/translation` — the one place a vendor port was not pure data, and a
+failure that surfaced only at runtime as an apiserver `Forbidden` error after
+everything else looked correct. `hack/gen-rbac` now derives those markers from
+the mapping documents themselves:
+
+```bash
+make manifests     # regenerates the markers, then the ClusterRole
+make verify-rbac   # fails if a mapping changed without regenerating
+```
+
+Nothing in that derivation is a judgement call — the source kind is read,
+status-updated and finalized; the emitted targets are fully managed — which is
+exactly why it belongs in a generator rather than in a reviewer's memory.
+`make verify-rbac` runs as part of `make lint`.
 
 There is no per-vendor controller, no `switch obj.GetKind()`, and no vendor
 package. The translation controller and the lifecycle manager are generic: they
@@ -109,6 +125,22 @@ mapping that breaks this does not load and the controller will not start.
 Write null-safe CEL in the roll-up (`.?field.orValue(...)`): a child that has
 not published status yet must not error it, and a child whose CRD has no status
 subresource exposes no conditions at all and should be non-blocking.
+
+**Gate the status block with the same guard your emits use:**
+
+```yaml
+status:
+  when: "source.spec.?dpuProductName.orValue('').matches('A100|ACME')"
+  conditions:
+    - type: ACMEReady
+      ...
+```
+
+Without `status.when`, a mapping whose emits are all guarded off *still*
+evaluates its readiness roll-up — over zero children — and parks a `False`
+condition on another vendor's card. Objects isolate correctly while status does
+not. The scaffold includes this gate; the conformance suite asserts neither
+vendor's card carries the other's condition.
 
 ## What the conformance suite will hold you to
 

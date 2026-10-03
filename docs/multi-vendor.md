@@ -248,21 +248,39 @@ printer column is `.status.conditions[?(@.type=='Ready')].status`
 **False for a working AMD card**. With `Ready` reserved to the daemon, that
 column now reports the daemon's real verdict, uncontested.
 
-### Residual, and the engine fix for it
+### The residual, now closed: `status.when`
 
-An AMD card still picks up a `DPFReady=False` condition from a mapping that owns
-nothing on it, and vice versa. That is cosmetic now — nothing keys off the other
-vendor's condition, and no printer column reads it — but it is noise. The clean
-fix is a guard on the status block itself, mirroring the per-emit `when`:
+Reserving `Ready` stopped the two mappings fighting, but left a residual: an AMD
+card still picked up a `DPFReady=False` from a mapping that owned nothing on it,
+and vice versa. A mapping's `status:` block had no guard, so even with every
+`emit` filtered out it evaluated its readiness roll-up — over zero children —
+and wrote a False condition onto the other vendor's object. Objects isolated
+correctly while status did not.
+
+`StatusMapping.When` closes it. It is the counterpart to the per-emit `when`,
+and when it evaluates false the engine writes **nothing at all** — not a False
+condition, not a zero-valued status field:
 
 ```yaml
 status:
-  when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"   # skip mirroring when false
+  when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"
+  conditions:
+    - type: DSCReady
+      ...
 ```
 
-That is roughly ten lines across `pkg/mapping/spec.go` and `engine.go`. It is
-still *not* included here, to keep the Phase 2 claim literal: this vendor port
-needed no Go. Tracked as Phase 2.1.
+Both vendor mappings now carry it. `servicefunctionchain.yaml` deliberately does
+not: `ServiceFunctionChain` is not a vendor-specific kind, so there is nothing to
+gate on.
+
+This was originally deferred to keep the Phase 2 claim literal — that the vendor
+port needed no Go. That claim stands on its own record; the gate is a general
+engine feature every vendor benefits from, and leaving a known reporting defect
+in place to protect a talking point was the wrong trade.
+
+The conformance isolation spec now asserts both directions: neither card carries
+the other vendor's condition, **and** each still carries its own — because a gate
+that suppressed all mirroring would also pass the first assertion.
 
 ## 4. What the conformance suite proves
 
@@ -302,14 +320,32 @@ Two further dimensions the architecture review names were added later, in
   whatever it is handed and would have shown green. The fix is an annotation
   fallback, with `spec.vendor` keeping precedence for the day upstream adds it.
 
-## 5. The one per-vendor Go touch
+## 5. The last per-vendor Go touch, now generated
 
-`controller-gen` builds the ClusterRole from `+kubebuilder:rbac` comments in
-`pkg/translation/translation_controller.go`, so a mapping targeting a new API
-group needs that group listed there. It is a comment, not logic — but it is the
-one place a vendor port is not pure data. Generating RBAC from the mapping
-documents would close it.
+`controller-gen` builds the ClusterRole from `+kubebuilder:rbac` comments, so a
+mapping targeting a new API group needed that group listed by hand in
+`pkg/translation/translation_controller.go`. It was a comment rather than logic,
+but it was the one place a vendor port was not pure data — and the worst kind of
+omission, because a forgotten group surfaces only at runtime, as an apiserver
+`Forbidden` error, after translation otherwise looks correct.
 
-`make new-vendor` prints this marker ready to paste, and
-[docs/vendor-integration.md](vendor-integration.md) is the full onboarding
-checklist that this AMD port was the dry run for.
+`hack/gen-rbac` now derives those markers from the mapping documents into
+`pkg/translation/zz_generated_rbac.go`. Every group, resource and verb is implied
+by the mapping: the source kind is read, status-updated and finalized; the
+emitted targets are fully managed. No judgement calls, which is why it belongs in
+a generator.
+
+The switch is verifiable rather than asserted: with the hand-written markers
+deleted and the generated ones in place, `config/rbac/role.yaml` regenerated
+**byte-identical**. The generator reproduces exactly what was there, including
+the `DSCNodePolicy` → `dscnodepolicies` pluralization a naive `+ "s"` gets wrong.
+
+- `make generate-rbac` regenerates; `make manifests` depends on it
+- `make verify-rbac` fails if a mapping changed without regenerating, and runs
+  as part of `make lint`
+- a test synthesises a vendor the repo has never seen and asserts its group
+  appears, which is the property being claimed
+
+So onboarding is now four touchpoints, three of them data and the fourth
+test-only — see [docs/vendor-integration.md](vendor-integration.md), the full
+checklist this AMD port was the dry run for.

@@ -89,17 +89,14 @@ echo "created ${mapping#"$dest/"}"
 echo "created ${crds#"$dest/"}/"
 cat <<EOF
 
-Two steps remain that a scaffold cannot do for you:
+One step remains that a scaffold cannot do for you:
 
-1. RBAC. controller-gen builds the ClusterRole from markers, so add the group
-   to pkg/translation/translation_controller.go:
-
-     //+kubebuilder:rbac:groups=${GROUP},resources=*,verbs=get;list;watch;create;update;patch;delete
-
-   then: make manifests
-
-2. A conformance case row in test/conformance/conformance_test.go, with
+1. A conformance case row in test/conformance/conformance_test.go, with
    readyCondition: "${PREFIX}Ready" and the field values you expect emitted.
 
-Then: make test
+RBAC needs no Go edit: it is generated from the mapping you just created.
+Run:
+
+  make manifests    # regenerates the RBAC markers, then the ClusterRole
+  make test
 EOF

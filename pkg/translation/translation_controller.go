@@ -63,21 +63,11 @@ type Reconciler struct {
 	Spec   *mapping.Spec
 }
 
-// +kubebuilder:rbac:groups=config.openshift.io,resources=dataprocessingunits,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=config.openshift.io,resources=dataprocessingunits/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=config.openshift.io,resources=dataprocessingunits/finalizers,verbs=update
-// +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=config.openshift.io,resources=servicefunctionchains/finalizers,verbs=update
-// +kubebuilder:rbac:groups=provisioning.dpu.nvidia.com,resources=dpus;dpudevices;dpuflavors;bfbs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=svc.dpu.nvidia.com,resources=dpuservices,verbs=get;list;watch;create;update;patch;delete
-//
-// Second vendor (config/mappings/amd-dsc200.yaml). Only the RBAC marker is
-// per-vendor: controller-gen sources the ClusterRole from these comments, so a
-// mapping that targets a new API group needs its group listed here even though
-// no Go logic changes. Generating RBAC from the mapping documents instead would
-// make a vendor port entirely data -- see docs/multi-vendor.md.
-// +kubebuilder:rbac:groups=dpu.amd.com,resources=dscdevices;dscprofiles;dscfirmwares;dscnodepolicies,verbs=get;list;watch;create;update;patch;delete
+// RBAC for the mapped kinds is NOT declared here. It is generated into
+// zz_generated_rbac.go from config/mappings by hack/gen-rbac, so onboarding a
+// vendor needs no Go edit at all. These markers were previously the one place a
+// vendor port was not pure data; `make generate-rbac` replaces that step, and
+// `make verify-rbac` fails the build if a mapping changed without it.
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("mapping", r.Spec.Metadata.Name)

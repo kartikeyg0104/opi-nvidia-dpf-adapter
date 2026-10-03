@@ -43,8 +43,16 @@ help: ## Display this help.
 
 ##@ Development
 
+.PHONY: generate-rbac
+generate-rbac: ## Generate the translation controller's RBAC markers from config/mappings.
+	go run ./hack/gen-rbac
+
+.PHONY: verify-rbac
+verify-rbac: ## Fail if the generated RBAC markers are stale.
+	go run ./hack/gen-rbac -check
+
 .PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+manifests: generate-rbac controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
@@ -109,7 +117,7 @@ check-no-lab-details: ## Fail if private lab details or real serials are tracked
 	./hack/check-no-lab-details.sh
 
 .PHONY: lint
-lint: check-no-lab-details golangci-lint ## Run golangci-lint linter
+lint: check-no-lab-details verify-rbac golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix
