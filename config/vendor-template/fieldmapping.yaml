@@ -105,6 +105,10 @@ emit:
 # status yet must not error the roll-up. Children whose CRD has no status
 # subresource expose no conditions at all and are treated as non-blocking.
 status:
+  # Ownership gate. Set it to the same guard the emits use: a mapping that
+  # emits nothing for a card must also mirror nothing, or it parks a False
+  # condition on hardware it has no claim to.
+  when: "source.spec.?dpuProductName.orValue('').matches('EV100|ExampleVendor')"
   conditions:
     - type: EVReady
       status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"

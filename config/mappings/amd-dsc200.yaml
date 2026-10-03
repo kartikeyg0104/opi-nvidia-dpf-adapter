@@ -148,6 +148,9 @@ emit:
 # wrote `Ready` onto the same source they would overwrite each other every
 # reconcile. See docs/multi-vendor.md, "Condition ownership".
 status:
+  # Ownership gate, matching the per-emit guards above: write nothing at all on
+  # a card this mapping does not claim.
+  when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"
   conditions:
     - type: DSCReady
       status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"

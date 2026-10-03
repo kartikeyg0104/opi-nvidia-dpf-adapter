@@ -104,6 +104,10 @@ emit:
 # is the "smoothing" of a vendor status quirk the mapping layer is meant to do.
 # CEL is null-safe so children without status never error the roll-up.
 status:
+  # Ownership gate, matching the per-emit guards above. Without it this block
+  # still evaluated on an AMD card -- over zero children -- and parked
+  # DPFReady=False on hardware this mapping owns nothing of.
+  when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
   conditions:
     - type: DPFReady
       status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"

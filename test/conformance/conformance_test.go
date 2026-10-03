@@ -514,6 +514,27 @@ spec:
 		// and neither may appear in the other vendor's namespace.
 		expectAbsent(flavorGVK, types.NamespacedName{Name: "dpf-default-flavor", Namespace: amdNS})
 		expectAbsent(dscProfileGVK, types.NamespacedName{Name: "dsc-default-profile", Namespace: dpfNS})
+
+		By("neither card carries the other vendor's condition")
+		// The status.when ownership gate. Before it, a mapping whose emits were
+		// all guarded off still evaluated its readiness roll-up -- over zero
+		// children -- and parked a False condition on the other vendor's card.
+		// Objects isolating correctly while status did not is exactly the gap
+		// this closes, so it is asserted here rather than only in unit tests.
+		amdGot := getObject(dpuGVK, amdNN)
+		Expect(conditionByType(amdGot, "DPFReady")).To(BeNil(),
+			"the DPF mapping wrote DPFReady onto an AMD card it emitted nothing for")
+
+		bfGot := getObject(dpuGVK, bfNN)
+		Expect(conditionByType(bfGot, "DSCReady")).To(BeNil(),
+			"the AMD mapping wrote DSCReady onto a BlueField card it emitted nothing for")
+
+		By("each card still carries its own vendor's condition")
+		// The gate must suppress only foreign mappings, not all mirroring.
+		Expect(conditionByType(amdGot, "DSCReady")).NotTo(BeNil(),
+			"the AMD card lost its own DSCReady condition; the gate is too aggressive")
+		Expect(conditionByType(bfGot, "DPFReady")).NotTo(BeNil(),
+			"the BlueField card lost its own DPFReady condition; the gate is too aggressive")
 	})
 })
 

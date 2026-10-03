@@ -149,6 +149,15 @@ func nonEmpty(s string) any {
 // source (the OPI object) and children (the list of emitted child objects,
 // each an unstructured map located by the translation labels).
 type StatusMapping struct {
+	// When gates the whole status block: a CEL expression that must evaluate
+	// to bool. When it is false, nothing is mirrored and the source's status is
+	// left untouched.
+	//
+	// This is the counterpart to the per-emit `when` guard. Without it, a
+	// mapping that emits nothing for a given card still evaluates its readiness
+	// roll-up over zero children and parks a False condition on hardware it
+	// owns nothing of. Set it to the same vendor guard the emits use.
+	When string `json:"when,omitempty" yaml:"when,omitempty"`
 	// Fields write computed values onto the source, addressed by dotted path
 	// rooted at the object (e.g. status.observedServices).
 	Fields []Field `json:"fields,omitempty" yaml:"fields,omitempty"`

@@ -116,6 +116,11 @@ status:
       message: "All translated DPUServices report Ready"
 ```
 
+`status.when` gates the whole block: when it is present and evaluates false,
+nothing is mirrored at all — no conditions, no fields. Set it to the same guard
+your `emit` rules use, or a mapping that emits nothing for a card will still
+write a `False` condition onto it.
+
 Each `conditions[]` entry's `status` is a CEL expression that must evaluate to
 bool; `type`, `reason`, and `message` are literals. Write null-safe CEL
 (`.?field.orValue(...)`) so children that have not yet published status do not

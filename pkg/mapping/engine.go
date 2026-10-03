@@ -185,6 +185,19 @@ func ApplyStatus(spec *Spec, source map[string]any, children []any) (map[string]
 		children = []any{}
 	}
 
+	// Gate the whole block before evaluating anything. A mapping that does not
+	// own this source must write nothing at all -- not a False condition, not a
+	// zero count -- or it reports on hardware it has no claim to.
+	if spec.Status.When != "" {
+		owns, err := evalBool(spec.Status.When, celVars(source, nil, children))
+		if err != nil {
+			return nil, fmt.Errorf("status when: %w", err)
+		}
+		if !owns {
+			return nil, nil
+		}
+	}
+
 	obj := map[string]any{}
 	for _, f := range spec.Status.Fields {
 		val, set, err := fieldValue(f, source, nil, children)
