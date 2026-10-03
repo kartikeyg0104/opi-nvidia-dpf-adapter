@@ -25,7 +25,7 @@ No file in the workspace declares an API group matching `*.amd.*`,
 
 What *is* present is hardware, not schema:
 
-- `lab/hardware/dh1/README.md` — a real **AMD Pensando DSC2-100**: PCI vendor
+- the private lab hardware notes — a real **AMD Pensando DSC2-100**: PCI vendor
   `0x1dd8`, `ionic` driver, VPD product `Pensando DSC2-100 100G 2p QSFP56 DPU`,
   serial `DSCEXAMPLE0001`, firmware `1.46.0-E-28`, management function at
   `0000:1b:00.0`. Every literal in the AMD mapping and its sample comes from here.
@@ -78,8 +78,8 @@ provisional. Swapping in real CRDs should change `amd-dsc200.yaml` and the
 
 ### Harvest result, dh1, 2026-09-17
 
-Ran `hack/fetch-amd-crds.sh` against dh1 (lab-host.invalid). **There are no AMD CRDs to
-fetch, because there is no Kubernetes on dh1 and no AMD software of any kind.**
+Ran `hack/fetch-amd-crds.sh` against dh1. **There are no AMD CRDs to fetch,
+because there is no Kubernetes on dh1 and no AMD software of any kind.**
 
 | Checked | Found |
 |---|---|
@@ -91,17 +91,18 @@ fetch, because there is no Kubernetes on dh1 and no AMD software of any kind.**
 | `/etc/pensando`, `/opt/pensando` | absent |
 | dpkg packages matching pensando/dsc/ionic/psm | none (only `amd64-microcode`, a CPU package) |
 | helm releases | helm not installed |
-| DSC management IP lab-mgmt.invalid | unreachable, :22/:443/:8888 all closed |
+| DSC card management endpoint | unreachable; no management service answering |
 
 `/root/.bash_history` shows the host has only ever been bootstrapped — `apt
 update`, `passwd`, `sshd_config`, `lspci`. No operator has ever been installed.
 
 The **hardware** is real and matches the lab docs exactly: Dell PowerEdge R650,
-Pensando DSC2 Elba, PCI vendor `0x1dd8` device `0x1002`, serial
-`DSCEXAMPLE0001`, firmware `1.46.0-E-28`, two `ionic`-bound data functions. Note
+Pensando DSC2 Elba, PCI vendor `0x1dd8` device `0x1002`, firmware
+`1.46.0-E-28`, two `ionic`-bound data functions. Note
 the host has been renamed from `dh1` to **`opi`**, and the management function
 `1b:00.0` is **not bound to any driver** — it still needs the manual
-`echo "1dd8 1004" > /sys/bus/pci/drivers/ionic/new_id` from `lab/hardware/dh1/README.md`.
+`echo "1dd8 1004" > /sys/bus/pci/drivers/ionic/new_id` from the (private) lab
+hardware notes.
 
 **The stubs in `test/conformance/crds/amd/` therefore remain stubs.** They were
 not replaced, because there is nothing real to replace them with. Getting real
@@ -141,12 +142,13 @@ not covered by the "a vendor port is pure data" claim.
 
 ### Operational note: SSH to the lab
 
-The lab VPN has a path-MTU blackhole below its 1399 MTU. The default
-post-quantum KEX reply is large enough to be dropped, so `ssh` hangs at
-`SSH2_MSG_KEX_ECDH_REPLY` with no error. Add to `~/.ssh/config`:
+A VPN with a path-MTU blackhole below its MTU will drop the default
+post-quantum KEX reply, which is large enough to exceed it -- `ssh` then hangs
+at `SSH2_MSG_KEX_ECDH_REPLY` with no error. Pinning a small KEX fixes it; add
+to `~/.ssh/config`, scoped to your own lab hosts:
 
 ```
-Host lab-subnet.* dh?
+Host <your-lab-hosts>
     KexAlgorithms curve25519-sha256
 ```
 

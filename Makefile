@@ -95,8 +95,12 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
+.PHONY: check-no-lab-details
+check-no-lab-details: ## Fail if private lab details or real serials are tracked.
+	./hack/check-no-lab-details.sh
+
 .PHONY: lint
-lint: golangci-lint ## Run golangci-lint linter
+lint: check-no-lab-details golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix

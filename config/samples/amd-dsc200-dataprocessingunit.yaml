@@ -6,8 +6,9 @@
 # mapping. Translating it emits DSCDevice + DSCProfile + DSCFirmware +
 # DSCNodePolicy into amd-dpu-system.
 #
-# Every value below was read off the live card in dh1 on 2026-09-17
-# (lspci -vvv -s 1b:00.0; devlink dev info pci/0000:19:00.0). On a real
+# The shape below was taken from a live card on 2026-09-17 (lspci -vvv;
+# devlink dev info). The serial is a placeholder -- real hardware serials are
+# not published here; cmd/vsp reads the true value off VPD. On a real
 # cluster cmd/vsp would stamp the annotations instead of them being hand-written
 # -- though note pkg/discovery/pci.go does not enumerate this card yet: it
 # filters on PCI vendor 0x15b3 (NVIDIA) and the DSC is 0x1dd8.

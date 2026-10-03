@@ -73,7 +73,7 @@ emit:
         from: spec.dpuProductName
         required: true
       # Literal defaults: the DSC management function binds to the ionic
-      # driver out of band (dh1: 1b:00.0, enp27s0np0, linklocal.invalid).
+      # driver out of band, on its own PCI function with a link-local address.
       - to: spec.management.driver
         value: ionic
       - to: spec.management.interface

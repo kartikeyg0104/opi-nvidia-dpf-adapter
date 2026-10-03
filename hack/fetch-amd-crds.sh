@@ -6,12 +6,16 @@
 # changes nothing. Provisioning dh1 is a separate, explicit step.
 #
 # Requires the lab SSH key to be unlocked in your agent first:
-#     ssh-add ~/.ssh/lab_key
+#     ssh-add ~/.ssh/<your-lab-key>
 #
-# Usage: hack/fetch-amd-crds.sh [outdir]      (default: ./amd-crd-harvest)
+# Host is not defaulted on purpose: lab addressing is site-specific and does not
+# belong in a public repo. Export it for the session instead.
+#
+# Usage: DH1_HOST=user@host hack/fetch-amd-crds.sh [outdir]
+#                                            (outdir default: ./amd-crd-harvest)
 set -euo pipefail
 
-HOST="${DH1_HOST:-root@lab-host.invalid}"
+HOST="${DH1_HOST:?set DH1_HOST=user@host (the AMD DSC lab host) before running}"
 OUT="${1:-amd-crd-harvest}"
 
 # KexAlgorithms: the lab VPN has a path-MTU blackhole below its 1399 MTU, and
