@@ -63,9 +63,14 @@ sed -e "s|dpu\.example\.com|${GROUP}|g" \
     -e "s|ExampleVendor|${PREFIX}|g" \
     "$tpl" > "$mapping"
 
-# Lines 1-12 of the template are a banner about the template itself.
-sed -i.bak '1,12d' "$mapping" && rm -f "${mapping}.bak"
+# The template opens with a banner about the template itself, plus an editor
+# schema modeline whose relative path differs from config/mappings/. Strip every
+# leading comment line -- not a fixed line count, which silently mis-trims the
+# moment the banner changes length -- and write our own header back.
+awk 'done || !/^#/ { done=1; print }' "$mapping" > "${mapping}.body" \
+  && mv "${mapping}.body" "$mapping"
 {
+  printf '# yaml-language-server: $schema=./fieldmapping.schema.json\n'
   printf '# %s adapter mapping, scaffolded from config/vendor-template/.\n' "$PREFIX"
   printf '# Next steps: docs/vendor-integration.md\n'
   cat "$mapping"

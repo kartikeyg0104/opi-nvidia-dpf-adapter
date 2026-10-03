@@ -228,6 +228,14 @@ func TestNewVendorScriptProducesWorkingMapping(t *testing.T) {
 		}
 	}
 
+	// The modeline must survive, and must point at the schema relative to
+	// config/mappings -- the template's own path is one directory further out,
+	// so a naive copy would leave a link that resolves nowhere.
+	if !strings.Contains(string(raw), "$schema=./fieldmapping.schema.json") {
+		t.Error("generated mapping has no editor schema modeline, or it points " +
+			"at the template's relative path instead of config/mappings")
+	}
+
 	// The guard must be two distinct alternatives, not the same word twice:
 	// matches('ACME|ACME') is the bug this pins.
 	for _, e := range spec.Emit {

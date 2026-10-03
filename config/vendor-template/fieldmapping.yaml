@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../mappings/fieldmapping.schema.json
 # Vendor integration template -- a working FieldMapping for a fictional vendor.
 #
 # This file is not a sketch. It loads, validates and translates: the test in

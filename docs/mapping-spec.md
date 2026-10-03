@@ -4,6 +4,30 @@ The TSC mandate for this companion repo is that **OPI→DPF field mapping is dat
 
 This file is the schema. The interpreter lives in `pkg/mapping`. Concrete documents live in `config/mappings/`.
 
+
+## Machine-readable schema
+
+`config/mappings/fieldmapping.schema.json` is this document in JSON Schema form
+(draft 2020-12). Every shipped mapping carries a modeline, so editors with
+`yaml-language-server` give completion and inline errors:
+
+```yaml
+# yaml-language-server: $schema=./fieldmapping.schema.json
+```
+
+The schema encodes the rules, not just the field names: `exactly one of
+from/cel/value` as a `oneOf`, and the reserved `Ready` condition type as a `not`
+pattern — so an editor rejects it before the controller refuses to start.
+
+It is hand-written, which means it could drift from the Go structs the engine
+actually uses. `pkg/mapping/schema_test.go` reflects over the struct json tags
+and fails if either side has a field the other does not, so a schema that
+reported a valid field as an error could not merge.
+
+This file is also the artifact the architecture review's Phase 1 asks for when
+it says to ratify the mapping-spec format as an OPI subproject: a contract that
+can be versioned and depended on, rather than prose plus a Go package.
+
 ## Document shape
 
 ```yaml

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./fieldmapping.schema.json
 apiVersion: translation.opi.nvidia.com/v1alpha1
 kind: FieldMapping
 metadata:

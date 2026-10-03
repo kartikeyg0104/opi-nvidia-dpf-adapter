@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kartikeyg0104/opi-nvidia-dpf-adapter/config/mappings/fieldmapping.schema.json",
+  "title": "FieldMapping",
+  "description": "A data-driven OPI->vendor translation document. The translation controller interprets this; it contains no per-vendor Go. This schema is the machine-readable form of docs/mapping-spec.md.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "source", "emit"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "translation.opi.nvidia.com/v1alpha1"
+    },
+    "kind": {
+      "const": "FieldMapping"
+    },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "source": {
+      "$ref": "#/$defs/objectRef",
+      "description": "The OPI kind the user authors. Every vendor watches the SAME source kind; vendors are told apart by the per-emit `when` guards, not by inventing a new source CRD."
+    },
+    "defaults": { "$ref": "#/$defs/defaults" },
+    "emit": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/emit" }
+    },
+    "status": { "$ref": "#/$defs/statusMapping" }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      }
+    },
+    "objectRef": {
+      "type": "object",
+      "required": ["group", "version", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "group": { "type": "string" },
+        "version": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namespace": {
+          "$ref": "#/$defs/value",
+          "description": "Applied to any emit that does not set its own namespace."
+        }
+      }
+    },
+    "emit": {
+      "type": "object",
+      "required": ["target", "name", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "target": { "$ref": "#/$defs/objectRef" },
+        "name": { "$ref": "#/$defs/value" },
+        "namespace": { "$ref": "#/$defs/value" },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL returning bool. The vendor guard: claim only your own hardware. Prefer matches() with an alternation over startsWith() -- the product string comes from PCI VPD and is messier than the catalogue name."
+        },
+        "forEach": { "$ref": "#/$defs/forEach" },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/field" }
+        }
+      }
+    },
+    "forEach": {
+      "type": "object",
+      "required": ["in"],
+      "additionalProperties": false,
+      "properties": {
+        "in": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dotted JSONPath selecting a list on the source, e.g. spec.networkFunctions. One object is emitted per element, available to CEL as `item`."
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["to"],
+      "additionalProperties": false,
+      "description": "Exactly one of from, cel or value must be set.",
+      "properties": {
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dotted JSONPath on the destination object."
+        },
+        "from": {
+          "type": "string",
+          "description": "Dotted JSONPath on the source, or item.* inside a forEach."
+        },
+        "cel": {
+          "type": "string",
+          "description": "CEL over {source, item, children}. Write null-safe: .?field.orValue(...)."
+        },
+        "value": {
+          "description": "A literal scalar, object or list."
+        },
+        "default": {
+          "description": "Used when from/cel resolves to null or an empty string."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Fail the mapping if the resolved value is still empty."
+        }
+      },
+      "oneOf": [
+        { "required": ["from"], "not": { "anyOf": [{ "required": ["cel"] }, { "required": ["value"] }] } },
+        { "required": ["cel"], "not": { "anyOf": [{ "required": ["from"] }, { "required": ["value"] }] } },
+        { "required": ["value"], "not": { "anyOf": [{ "required": ["from"] }, { "required": ["cel"] }] } }
+      ]
+    },
+    "value": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A name/namespace expression. Exactly one of from, cel or value.",
+      "properties": {
+        "from": { "type": "string" },
+        "cel": { "type": "string" },
+        "value": { "type": "string" },
+        "default": {},
+        "required": { "type": "boolean" }
+      },
+      "oneOf": [
+        { "required": ["from"], "not": { "anyOf": [{ "required": ["cel"] }, { "required": ["value"] }] } },
+        { "required": ["cel"], "not": { "anyOf": [{ "required": ["from"] }, { "required": ["value"] }] } },
+        { "required": ["value"], "not": { "anyOf": [{ "required": ["from"] }, { "required": ["cel"] }] } }
+      ]
+    },
+    "statusMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL returning bool, gating the WHOLE block. When false nothing is mirrored -- no conditions and no fields. Set it to the same guard the emits use, or a mapping that emits nothing for a card still writes a False condition onto it."
+        },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/field" }
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/statusCondition" }
+        }
+      }
+    },
+    "statusCondition": {
+      "type": "object",
+      "required": ["type", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Must be vendor-scoped, e.g. DPFReady or DSCReady. `Ready` is RESERVED: the per-node dpu-operator daemon owns it on OPI sources, conditions are upserted by type, and Ready is the CRD's printer column -- a second writer flaps it and misreports healthy hardware.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$",
+          "not": { "pattern": "^[Rr][Ee][Aa][Dd][Yy]$" }
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL returning bool, mapped onto True/False."
+        },
+        "reason": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}
