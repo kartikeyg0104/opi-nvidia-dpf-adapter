@@ -195,37 +195,72 @@ incumbent for existing CRs that predate this field being load-bearing.
 change worth making, and deliberately **not** made here so this vendor port
 stays pure data.
 
-## 3. Known limitation: condition ownership
+## 3. Condition ownership: the single-writer model
 
-The controller upserts `status.conditions` **by type**. Two mappings on one
-source must not both write `Ready`, or each would overwrite the other every
-reconcile. So `amd-dsc200.yaml` mirrors `DSCReady` instead.
+The controller upserts `status.conditions` **by type**, so condition ownership
+has to be settled rather than assumed. Two writers on one condition type
+overwrite each other every reconcile.
 
-That avoids the write loop but leaves a real reporting defect. A healthy AMD card
-reconciled by both mappings ends up with:
+There are two writers in play on an OPI source, and only one of them is ours:
+
+| Writer | Condition | Where |
+| --- | --- | --- |
+| dpu-operator daemon (per node) | `Ready` | seeded `False/Initializing` in `internal/platform/vendordetector.go`, then updated from plugin-init + VSP ping in `internal/daemon/daemon.go` |
+| this translation controller | `DPFReady` / `DSCReady` | the `status:` block of each mapping |
+
+Both reach for `plugin.ReadyConditionType` (`= "Ready"`), and the daemon's writer
+is not a one-shot: it re-evaluates on every ping cycle, so a second writer does
+not merely race it once.
+
+So **`Ready` is reserved**: no mapping document may write it. Each mapping owns
+exactly one vendor-scoped condition instead — `dataprocessingunit.yaml` mirrors
+`DPFReady`, `amd-dsc200.yaml` mirrors `DSCReady`, and neither touches the
+daemon's.
+
+This is enforced, not documented-and-hoped-for. `Spec.Validate` rejects a
+`status.conditions[].type` of `Ready` (case-insensitively), so a mapping that
+breaks the model fails to load — the controller will not start with it and CI
+will not merge it. Two further guards back it up:
+
+- `pkg/mapping/status_owner_test.go` walks the shipped mapping set and asserts
+  that no two mappings on the same source kind claim the same condition type.
+- `test/conformance` asserts the *running* controller leaves `Ready` absent on
+  every source it reconciles — the document-level rule proven as behaviour, not
+  just as schema validation.
+
+### What this fixed
+
+Before the reserved type, both our mappings wrote `Ready`. Because a mapping's
+`status:` block has no `when` guard, the DPF mapping still evaluated its
+roll-up on an AMD card — over zero children — and a healthy DSC2-100 ended up
+carrying:
 
 ```
 type=Ready     status=False  reason=AllChildrenReady   # from the DPF mapping, which owns nothing here
 type=DSCReady  status=True   reason=AllChildrenReady   # from the AMD mapping
 ```
 
-`Ready=False` is stable (no hot loop), but the `DataProcessingUnit` CRD's printer
-column is `.status.conditions[?(@.type=='Ready')].status`, so **`kubectl get dpu`
-shows False for a working AMD card.**
+`Ready=False` was stable (no hot loop), but the `DataProcessingUnit` CRD's
+printer column is `.status.conditions[?(@.type=='Ready')].status`
+(`config.openshift.io_dataprocessingunits.yaml`), so `kubectl get dpu` showed
+**False for a working AMD card**. With `Ready` reserved to the daemon, that
+column now reports the daemon's real verdict, uncontested.
 
-The root cause is that `StatusMapping` has no way to say "this mapping does not
-own this source, write nothing". The fix is small and belongs in the engine:
+### Residual, and the engine fix for it
+
+An AMD card still picks up a `DPFReady=False` condition from a mapping that owns
+nothing on it, and vice versa. That is cosmetic now — nothing keys off the other
+vendor's condition, and no printer column reads it — but it is noise. The clean
+fix is a guard on the status block itself, mirroring the per-emit `when`:
 
 ```yaml
 status:
   when: "source.spec.?dpuProductName.orValue('').matches('DSC|Pensando')"   # skip mirroring when false
 ```
 
-That is roughly ten lines across `pkg/mapping/spec.go` and `engine.go`, and it
-would let both vendors mirror the canonical `Ready`. It is *not* included here,
-because Phase 2's claim is that a vendor port needs no Go — and the honest
-version of that claim is "no Go, with this one caveat", not a silently patched
-engine. Track it as Phase 2.1.
+That is roughly ten lines across `pkg/mapping/spec.go` and `engine.go`. It is
+still *not* included here, to keep the Phase 2 claim literal: this vendor port
+needed no Go. Tracked as Phase 2.1.
 
 ## 4. What the conformance suite proves
 

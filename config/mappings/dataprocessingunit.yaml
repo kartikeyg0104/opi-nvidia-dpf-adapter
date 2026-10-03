@@ -86,17 +86,26 @@ emit:
 
 # Mirror the emitted children's readiness back onto the DataProcessingUnit.
 # The DataProcessingUnit CRD status schema defines conditions[] (metav1), so a
-# Ready condition mirrors cleanly; custom scalar status fields would be pruned
-# by the apiserver and are intentionally omitted.
+# condition mirrors cleanly; custom scalar status fields would be pruned by the
+# apiserver and are intentionally omitted.
 #
-# Readiness contract: the source is Ready when every child that publishes
+# Single-writer status model: this condition is DPFReady, NOT Ready. The
+# per-node dpu-operator daemon owns Ready on this very object -- it seeds it in
+# internal/platform/vendordetector.go and updates it from plugin-init plus VSP
+# ping in internal/daemon/daemon.go. Two controllers patching one condition type
+# would flap it on every reconcile, and Ready is also the CRD's printer column,
+# so losing that race shows a working card as not ready. The translation
+# controller therefore owns exactly one vendor-scoped condition and never
+# touches the daemon's. amd-dsc200.yaml does the same with DSCReady.
+#
+# Readiness contract: the source is DPFReady when every child that publishes
 # conditions reports Ready=True. Children whose CRD has no status subresource
 # (e.g. DPUFlavor) expose no conditions and are treated as non-blocking -- this
 # is the "smoothing" of a vendor status quirk the mapping layer is meant to do.
 # CEL is null-safe so children without status never error the roll-up.
 status:
   conditions:
-    - type: Ready
+    - type: DPFReady
       status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
       reason: AllChildrenReady
       message: "All emitted DPF objects that publish readiness report Ready"

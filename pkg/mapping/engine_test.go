@@ -252,7 +252,9 @@ func statusSpec() *Spec {
 		Status: &StatusMapping{
 			Fields: []Field{{To: "status.observedServices", CEL: "children.size()"}},
 			Conditions: []StatusCondition{{
-				Type:    "Ready",
+				// Vendor-scoped, not "Ready": Validate reserves that type for
+				// the dpu-operator daemon. See ReservedConditionType.
+				Type:    "DPFReady",
 				Status:  "children.size() > 0 && children.all(c, c.status.ready == true)",
 				Reason:  "AllReady",
 				Message: "all children ready",
@@ -279,7 +281,7 @@ func TestApplyStatusAllReady(t *testing.T) {
 		t.Fatalf("conditions=%v", st["conditions"])
 	}
 	c0 := conds[0].(map[string]any)
-	if c0["type"] != "Ready" || c0["status"] != "True" || c0["reason"] != "AllReady" {
+	if c0["type"] != "DPFReady" || c0["status"] != "True" || c0["reason"] != "AllReady" {
 		t.Errorf("condition=%v", c0)
 	}
 }

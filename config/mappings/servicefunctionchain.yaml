@@ -44,6 +44,11 @@ emit:
 
 # Mirror DPUService readiness back onto the ServiceFunctionChain.
 #
+# Single-writer status model: this condition is DPFReady, not Ready. Ready on
+# OPI sources belongs to the per-node dpu-operator daemon; the translation
+# controller owns only its own vendor-scoped condition. See the longer note in
+# dataprocessingunit.yaml.
+#
 # NOTE: the current ServiceFunctionChain CRD (dpu-operator) declares an empty
 # status object, so the apiserver prunes everything written here -- this mirror
 # is a no-op until that CRD gains a status schema with conditions[]. The rule
@@ -51,7 +56,7 @@ emit:
 # the conformance suite asserts GC/owner-refs for this source, not status.
 status:
   conditions:
-    - type: Ready
+    - type: DPFReady
       status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
       reason: AllServicesReady
       message: "All translated DPUServices report Ready"

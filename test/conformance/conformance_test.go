@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
+	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/mapping"
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/translation"
 )
 
@@ -61,22 +62,29 @@ type conformanceCase struct {
 	// statusPruned marks a source whose CRD status schema drops mirrored fields
 	// (the current ServiceFunctionChain). Such a case asserts GC/owner-refs only.
 	statusPruned bool
-	// expectReady asserts the source carries a mirrored Ready=True condition
-	// after status-capable children are marked ready.
+	// expectReady asserts the source carries the mirrored condition named by
+	// readyCondition with status True, after status-capable children are
+	// marked ready.
 	expectReady bool
-	// readyCondition is the condition type this mapping mirrors, defaulting to
-	// Ready. Mappings that share a source kind must not share a condition type:
-	// the controller upserts conditions by type, so two vendors both writing
-	// Ready would overwrite each other on every reconcile.
+	// readyCondition is the condition type this mapping mirrors. It has no
+	// default and must be vendor-scoped: mappings that share a source kind must
+	// not share a condition type, because the controller upserts conditions by
+	// type and two vendors both writing one would overwrite each other on every
+	// reconcile. It also may not be "Ready" -- that condition belongs to the
+	// per-node dpu-operator daemon (mapping.ReservedConditionType).
 	readyCondition string
 }
 
-// readyConditionType is the condition a case asserts, defaulting to Ready.
+// readyConditionType is the condition a case asserts. There is deliberately no
+// default: a case that asserts readiness must name the condition it owns, so a
+// mapping silently falling back onto the daemon's Ready cannot pass.
 func (c conformanceCase) readyConditionType() string {
-	if c.readyCondition != "" {
-		return c.readyCondition
-	}
-	return "Ready"
+	GinkgoHelper()
+	Expect(c.readyCondition).NotTo(BeEmpty(),
+		"case %q sets expectReady but names no readyCondition", c.name)
+	Expect(c.readyCondition).NotTo(Equal(mapping.ReservedConditionType),
+		"case %q mirrors %q, which the dpu-operator daemon owns", c.name, mapping.ReservedConditionType)
+	return c.readyCondition
 }
 
 const (
@@ -136,7 +144,8 @@ spec:
 			// treated as non-blocking by the mapping's readiness CEL.
 			{gvk: flavorGVK, name: "dpf-default-flavor", ns: dpfNS, setReady: false},
 		},
-		expectReady: true,
+		expectReady:    true,
+		readyCondition: "DPFReady",
 	},
 	{
 		// Second vendor, same source kind, same engine, zero Go. Driven by the
@@ -264,6 +273,16 @@ var _ = Describe("Hybrid translation conformance", func() {
 					Expect(cond).NotTo(BeNil(), "source is missing a mirrored %s condition", condType)
 					Expect(cond["status"]).To(Equal("True"),
 						"mirrored %s condition should be True once ready children report Ready", condType)
+
+					By("leaving the daemon-owned condition untouched")
+					// Single-writer status model. Validate blocks a mapping that
+					// declares Ready; this asserts the running controller never
+					// puts one on the source by any other route, so the per-node
+					// dpu-operator daemon stays the only writer of Ready.
+					Expect(conditionByType(got, mapping.ReservedConditionType)).To(BeNil(),
+						"controller wrote %q on the source; that condition belongs to the "+
+							"dpu-operator daemon and the two would flap it every reconcile",
+						mapping.ReservedConditionType)
 				}
 			})
 		})

@@ -110,7 +110,7 @@ status:
     - to: status.serviceCount
       cel: "children.size()"
   conditions:                      # upserted onto status.conditions by type
-    - type: Ready
+    - type: DPFReady               # NOT "Ready" -- see the reserved type below
       status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
       reason: AllServicesReady
       message: "All translated DPUServices report Ready"
@@ -123,15 +123,31 @@ error the roll-up. The controller upserts conditions by `type`, preserving
 `lastTransitionTime` while a condition's status is unchanged and stamping a
 fresh time when it flips.
 
+Note the asymmetry in the example above: the condition this mapping *writes* is
+`DPFReady`, while the CEL *reads* `cond.type == 'Ready'` on the children. That
+is deliberate — the children are DPF's own objects publishing their own `Ready`,
+which is exactly what the roll-up should consult.
+
+### Reserved condition type: `Ready`
+
+A mapping document **may not** write a condition of type `Ready`. On an OPI
+source that condition belongs to the per-node dpu-operator daemon
+(`plugin.ReadyConditionType`); since the controller upserts by `type`, a mapping
+writing it would fight the daemon and flap the condition on every reconcile.
+
+`Spec.Validate` rejects it case-insensitively, so such a document fails to load
+and the controller will not start. Own a vendor-scoped condition instead
+(`DPFReady`, `DSCReady`). The constant is `mapping.ReservedConditionType`, and
+`docs/multi-vendor.md` §3 explains the single-writer model in full.
+
 ## Multiple vendors on one source kind
 
 Two mapping documents may declare the same `source`. `cmd/main.go` then starts
 one controller per mapping and both reconcile every object of that kind, so each
 `emit` needs a `when` guard that claims only its own hardware, and each mapping
-must mirror a **distinct** condition type — the controller upserts conditions by
-`type`, so a shared `Ready` would have the two mappings overwrite each other
-every reconcile.
+must mirror a **distinct**, vendor-scoped condition type — neither sharing one
+with each other, nor taking the daemon's reserved `Ready`.
 
 `config/mappings/amd-dsc200.yaml` is the worked example, and
-[docs/multi-vendor.md](multi-vendor.md) covers the routing, the condition-
-ownership limitation it exposes, and what is still needed from the lab hosts.
+[docs/multi-vendor.md](multi-vendor.md) covers the routing, the single-writer
+status model, and what is still needed from the lab hosts.

@@ -29,6 +29,21 @@ const APIVersion = "translation.opi.nvidia.com/v1alpha1"
 // Kind is the mapping-spec kind.
 const Kind = "FieldMapping"
 
+// ReservedConditionType is the condition type a mapping document may not write.
+//
+// Single-writer status model: on an OPI source object, Ready is owned by the
+// per-node dpu-operator daemon. Upstream seeds it on the DataProcessingUnit at
+// creation (internal/platform/vendordetector.go, Ready=False/Initializing) and
+// then keeps it current from plugin-init plus VSP ping
+// (internal/daemon/daemon.go), all via plugin.ReadyConditionType.
+//
+// The translation controller upserts conditions by type, so a mapping that also
+// wrote Ready would fight the daemon and flap the condition every reconcile.
+// Each mapping therefore owns its own vendor-scoped condition instead --
+// DPFReady for NVIDIA, DSCReady for AMD. Validate rejects the reserved type at
+// load time, so a mapping that breaks the model cannot merge or start.
+const ReservedConditionType = "Ready"
+
 // Spec is a data-driven OPI→DPF translation document. The controller
 // interprets this file; it does not contain Go switch statements on Kind.
 type Spec struct {
@@ -205,6 +220,12 @@ func (s *Spec) Validate() error {
 			}
 			if strings.TrimSpace(c.Status) == "" {
 				return fmt.Errorf("status.conditions[%d].status (CEL) is required", i)
+			}
+			// Single-writer status model; see ReservedConditionType.
+			if strings.EqualFold(strings.TrimSpace(c.Type), ReservedConditionType) {
+				return fmt.Errorf("status.conditions[%d].type must not be %q: that condition "+
+					"is owned by the dpu-operator daemon; use a vendor-scoped type "+
+					"(e.g. DPFReady, DSCReady)", i, ReservedConditionType)
 			}
 		}
 	}
