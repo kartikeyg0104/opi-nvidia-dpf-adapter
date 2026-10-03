@@ -26,6 +26,7 @@ rules:
   - config.openshift.io
   resources:
   - dataprocessingunits/status
+  - dpuoperatorconfigs/status
   - servicefunctionchains/status
   verbs:
   - get
@@ -39,12 +40,6 @@ rules:
   - get
   - list
   - watch
-- apiGroups:
-  - config.openshift.io
-  resources:
-  - dpuoperatorconfigs/status
-  verbs:
-  - get
 - apiGroups:
   - dpu.amd.com
   resources:

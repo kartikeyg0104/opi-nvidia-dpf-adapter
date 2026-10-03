@@ -281,6 +281,27 @@ The suite now derives its scheme from whatever mappings are loaded
 (`gvksFromSpecs`), so a third vendor needs a mapping, its CRDs under
 `test/conformance/crds/`, and a case row — no other Go edit.
 
+Two further dimensions the architecture review names were added later, in
+`test/conformance/dimensions_test.go`:
+
+- **Detection handshake.** The per-node gRPC seam is how the daemon discovers a
+  vendor is present at all. It was covered by `pkg/vsp` unit tests but sat
+  outside the gate, so an adapter could pass conformance while failing the
+  handshake the daemon actually performs. Now run per vendor (NVIDIA, AMD,
+  Marvell) off the same enumerator abstraction the real VSP uses.
+- **Version-skew behaviour.** `pkg/lifecycle` pins a supported window per
+  vendor and publishes `VendorOperatorSupported` on `DpuOperatorConfig`. See
+  [docs/vendor-integration.md](vendor-integration.md) for the classification
+  table.
+
+  Asserting this against envtest rather than a fake client paid for itself
+  immediately: it showed the reporting was **unreachable on a real cluster**.
+  The LCM read the requested vendor from `spec.vendor`, which the upstream CRD
+  does not define, so the apiserver pruned it, `vendor` always resolved empty
+  and the reconcile returned before reporting any skew. A fake client keeps
+  whatever it is handed and would have shown green. The fix is an annotation
+  fallback, with `spec.vendor` keeping precedence for the day upstream adds it.
+
 ## 5. The one per-vendor Go touch
 
 `controller-gen` builds the ClusterRole from `+kubebuilder:rbac` comments in

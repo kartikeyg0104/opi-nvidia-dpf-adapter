@@ -42,6 +42,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/lifecycle"
 	"github.com/kartikeyg0104/opi-nvidia-dpf-adapter/pkg/mapping"
 )
 
@@ -127,6 +128,9 @@ var _ = BeforeSuite(func() {
 	for _, gvk := range gvksFromSpecs(specs) {
 		registerUnstructured(scheme, gvk)
 	}
+	// Not referenced by any mapping: the lifecycle manager reconciles it, and
+	// the version-skew dimension asserts the condition it publishes there.
+	registerUnstructured(scheme, lifecycle.DpuOperatorConfigGVK)
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())

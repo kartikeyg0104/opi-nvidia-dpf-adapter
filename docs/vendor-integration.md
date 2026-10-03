@@ -124,20 +124,72 @@ in CI via `make test`. It asserts, per vendor:
 - cleanup on delete, including annotation-tracked cross-namespace children
 - multi-vendor isolation: with two vendors' sources in one cluster, each
   produces its own object set and none of the other's
+- **the detection handshake**: the VSP answers `Init`, `GetDevices` on both the
+  dpu-api and OPI-API surfaces, and the network-function add/delete calls, and
+  shuts down cleanly — run per vendor off the same enumerator abstraction the
+  real VSP uses, so the seam is proven vendor-independent rather than
+  NVIDIA-shaped
+- **version-skew behaviour**: see below
 
 The suite derives its scheme from whatever mappings are loaded, so a third
 vendor needs a mapping, CRDs, and a case row — no other Go edit.
 
-## Not yet in the scaffold
+## Version skew: pin your operator's supported window
 
-Two items from the review's Phase 1 remain open, and the template does not
-pretend otherwise:
+The adapter writes the vendor operator's CRs, which makes that operator's API a
+hard dependency. A release that renames a field or bumps a CRD version turns
+every translation into a silent no-op or an apply error, and the only symptom is
+objects that never become ready. That is an afternoon of debugging unless the
+adapter says so out loud.
 
-- **Version-skew behaviour.** The review names it as a conformance dimension.
-  There is no implementation to test yet; it needs the lifecycle manager to pin
-  and check a vendor operator version first.
-- **Detection handshake inside the gate.** It is covered, but as `pkg/vsp` unit
-  tests rather than as a conformance dimension.
+So add the window your conformance run actually passed against to
+`supportedVersions` in `pkg/lifecycle/version.go`:
+
+```go
+var supportedVersions = map[string]SupportedRange{
+    "nvidia": {MinInclusive: "v25.1.0", MaxExclusive: "v26.0.0"},
+}
+```
+
+The window is half-open, because the useful statement is "tested up to, but not
+including, the next major". The lifecycle manager classifies the installed
+version against it and publishes `VendorOperatorSupported` on
+`DpuOperatorConfig`:
+
+| Classification | Condition | Meaning |
+| --- | --- | --- |
+| `Supported` | `True` | inside the window |
+| `TooOld` | `False` | predates it; expect fields this adapter writes to be missing |
+| `TooNew` | `False` | postdates it; the CRD schema may have moved |
+| `Unknown` | `Unknown` | no version could be determined, or it did not parse |
+| `Unpinned` | `Unknown` | the vendor has no declared window — a vendor absent from the map |
+
+Only a definite mismatch is `False`. "Could not determine" and "no window
+pinned" are `Unknown`, because reporting those as failures trains operators to
+ignore the condition.
+
+Note the condition is `VendorOperatorSupported`, not `Ready` — the same
+single-writer rule as mappings. The daemon owns `Ready` on `DpuOperatorConfig`
+too, and it is that CRD's printer column.
+
+### How the vendor and version are declared
+
+Until upstream `DpuOperatorConfig` grows a `spec.vendor` field, both are
+annotations:
+
+```yaml
+metadata:
+  annotations:
+    lifecycle.opi.nvidia.com/vendor: nvidia
+    lifecycle.opi.nvidia.com/vendor-operator-version: v25.4.0
+```
+
+`spec.vendor` takes precedence when present, so nothing changes the day it
+lands. The annotation is not a convenience: the apiserver **prunes** unknown
+spec fields, so `spec.vendor` reads empty on a real cluster today and the
+reconcile would short-circuit before reporting anything. The conformance suite
+found that, because it runs against a real apiserver where pruning happens
+rather than a fake client that keeps whatever it is handed.
 
 ## Further reading
 
