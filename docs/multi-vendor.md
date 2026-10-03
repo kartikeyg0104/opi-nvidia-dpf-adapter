@@ -288,3 +288,7 @@ The suite now derives its scheme from whatever mappings are loaded
 group needs that group listed there. It is a comment, not logic — but it is the
 one place a vendor port is not pure data. Generating RBAC from the mapping
 documents would close it.
+
+`make new-vendor` prints this marker ready to paste, and
+[docs/vendor-integration.md](vendor-integration.md) is the full onboarding
+checklist that this AMD port was the dry run for.

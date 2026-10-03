@@ -1,0 +1,112 @@
+# Vendor integration template -- a working FieldMapping for a fictional vendor.
+#
+# This file is not a sketch. It loads, validates and translates: the test in
+# pkg/mapping/vendor_template_test.go runs the real loader and the real engine
+# over it on every CI run, so it cannot rot into something that no longer works.
+#
+# Copy it with:   make new-vendor VENDOR=acme GROUP=dpu.acme.com PRODUCT=A100
+# or by hand, replacing every "examplevendor" / "ExampleVendor" / "EV" / "EV100"
+# / "dpu.example.com" token below.
+#
+# Read docs/vendor-integration.md for the five things a new vendor touches and
+# docs/mapping-spec.md for the full field reference.
+apiVersion: translation.opi.nvidia.com/v1alpha1
+kind: FieldMapping
+metadata:
+  name: examplevendor-ev100
+  description: |
+    Translates an OPI DataProcessingUnit describing an ExampleVendor EV100
+    into that vendor's own CRs. Nothing here is NVIDIA- or AMD-specific; the
+    controller interprets this document and contains no vendor Go.
+
+# The OPI kind the user authors. Every vendor watches the SAME source kind --
+# that is the point of OPI. Vendors are told apart by the `when` guards below,
+# not by inventing a new source CRD (doing that is the single most common
+# defect; see docs/vendor-integration.md).
+source:
+  group: config.openshift.io
+  version: v1
+  kind: DataProcessingUnit
+
+# Inherited by every emit that does not set its own namespace. Declaring it
+# once here avoids repeating an identical CEL expression on each target.
+defaults:
+  namespace:
+    cel: "source.metadata.?namespace.orValue('') != '' ? source.metadata.namespace : 'examplevendor-system'"
+
+emit:
+  # ---------------------------------------------------------------------------
+  # 1. The device object. The simplest shape: one required field read from an
+  #    annotation that the VSP stamps after enumerating hardware.
+  # ---------------------------------------------------------------------------
+  - target:
+      group: dpu.example.com
+      version: v1alpha1
+      kind: EVDevice
+    # VENDOR GUARD -- the most important line in the file.
+    #
+    # Several mappings watch this one source kind, so each must claim only its
+    # own hardware or every card sprouts every vendor's CRs. Use `matches` with
+    # an alternation, not `startsWith`: the real product string comes from PCI
+    # VPD and is messier than a catalogue name. A guard that passed a tidy name
+    # and failed the VPD string is a mistake already made once here -- see
+    # docs/multi-vendor.md, "the vendor guard was broken".
+    when: "source.spec.?dpuProductName.orValue('').matches('EV100|ExampleVendor')"
+    name:
+      cel: "source.metadata.name + '-device'"
+    fields:
+      - to: spec.serialNumber
+        cel: "source.metadata.?annotations['dpu.example.com/serial-number'].orValue('')"
+        required: true
+      # A plain 1:1 JSONPath copy needs no CEL.
+      - to: spec.nodeName
+        from: spec.nodeName
+        required: true
+
+  # ---------------------------------------------------------------------------
+  # 2. The firmware object. Shows the three shape mismatches a real vendor port
+  #    runs into, all handled as data:
+  #      - nested destination paths  (flat source -> nested target)
+  #      - an inverted boolean       (noEffect: true -> drain.enabled: false)
+  #      - a derived enum            (bool source field -> string target enum)
+  # ---------------------------------------------------------------------------
+  - target:
+      group: dpu.example.com
+      version: v1alpha1
+      kind: EVFirmware
+    when: "source.spec.?dpuProductName.orValue('').matches('EV100|ExampleVendor')"
+    name:
+      cel: "source.metadata.?annotations['dpu.example.com/firmware'].orValue('ev-firmware')"
+    fields:
+      # Nested: the URL lives at spec.image.url here, not spec.url.
+      - to: spec.image.url
+        cel: "source.metadata.?annotations['dpu.example.com/firmware-url'].orValue('')"
+        required: true
+      # Object reference rather than a bare name string.
+      - to: spec.deviceRef.name
+        cel: "source.metadata.name + '-device'"
+      # Inverted boolean: OPI says "do not disturb the node", this vendor's API
+      # says "draining is enabled". Same intent, opposite polarity.
+      - to: spec.drain.enabled
+        value: false
+      # Derived enum: a bool on the source becomes a string on the target.
+      - to: spec.mode
+        cel: "source.spec.?isDpuSide.orValue(false) ? 'dpu' : 'smartnic'"
+
+# Mirror the emitted children's readiness back onto the OPI source.
+#
+# The condition type MUST be vendor-scoped. "Ready" is reserved: the per-node
+# dpu-operator daemon owns it on this object, and the controller upserts
+# conditions by type, so writing Ready here would fight the daemon and flap the
+# condition every reconcile. Spec.Validate rejects it outright -- a mapping that
+# tries will not load. See docs/multi-vendor.md section 3.
+#
+# Write null-safe CEL (.?field.orValue(...)): children that have not published
+# status yet must not error the roll-up. Children whose CRD has no status
+# subresource expose no conditions at all and are treated as non-blocking.
+status:
+  conditions:
+    - type: EVReady
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      reason: AllChildrenReady
+      message: "All emitted ExampleVendor objects that publish readiness report Ready"

@@ -83,6 +83,21 @@ registration. They load the real mapping YAML and assert a chart NF
 emits `spec.helmChart.source.repoURL` / `version`, while an image-only
 NF yields `NotFound`.
 
+## Adding a vendor
+
+```bash
+make new-vendor VENDOR=acme GROUP=dpu.acme.com MODEL=A100 PREFIX=ACME
+```
+
+Onboarding a vendor touches five things, four of them data; the only Go is a
+`+kubebuilder:rbac` marker comment and, if the VSP must stamp serials, one PCI
+table entry. There is no per-vendor controller and no `switch` on Kind.
+
+See [docs/vendor-integration.md](docs/vendor-integration.md) for the checklist
+and the four mistakes the scaffold is shaped to prevent, and
+[docs/multi-vendor.md](docs/multi-vendor.md) for the AMD port as a worked
+example.
+
 ## Vendor-Specific Plugin
 
 Intel/Marvell VSPs **are** the source of truth the in-tree daemon

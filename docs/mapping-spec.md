@@ -148,6 +148,10 @@ one controller per mapping and both reconcile every object of that kind, so each
 must mirror a **distinct**, vendor-scoped condition type — neither sharing one
 with each other, nor taking the daemon's reserved `Ready`.
 
+To start a new vendor from a working, CI-tested skeleton rather than from this
+reference, run `make new-vendor` and read
+[docs/vendor-integration.md](vendor-integration.md).
+
 `config/mappings/amd-dsc200.yaml` is the worked example, and
 [docs/multi-vendor.md](multi-vendor.md) covers the routing, the single-writer
 status model, and what is still needed from the lab hosts.
