@@ -72,7 +72,7 @@ func TestStressThousandsUsers(t *testing.T) {
 		t.Log(line)
 	}
 	if broke {
-		t.Log("stress found break points (not fixed)")
+		t.Fatal("stress found break points")
 	}
 }
 
@@ -199,7 +199,8 @@ func stressReconcileManyConfigs() stressBreak {
 		cfg.SetAnnotations(map[string]string{VersionAnnotation: NVIDIAChartVersion})
 		cfgs = append(cfgs, cfg)
 	}
-	cl := fake.NewClientBuilder().WithScheme(lcmScheme()).WithObjects(cfgs...).Build()
+	cl := fake.NewClientBuilder().WithScheme(lcmScheme()).
+		WithObjects(cfgs...).WithStatusSubresource(cfgs...).Build()
 	mem := &MemoryHelmClient{}
 	_, _ = HelmInstaller{Client: mem}.Ensure(context.Background(), nvidiaIntent())
 	mgr := &LifecycleManager{Client: cl, Scheme: lcmScheme(), Helm: mem, Probe: ReadyClusterProbe()}

@@ -69,7 +69,7 @@ func LiveDevices(e Enumerator) ([]Device, error) {
 // Flavor and firmware URL are operator config, not inventory.
 func IdentityKeys() []string {
 	keys := make([]string, 0, 1+len(annotationsByVendor))
-	keys = append(keys, PCIAddressAnnotation)
+	keys = append(keys, PCIAddressAnnotation, ProductNameAnnotation)
 	for _, v := range annotationsByVendor {
 		keys = append(keys, v.Serial)
 	}
@@ -79,7 +79,7 @@ func IdentityKeys() []string {
 // HasIdentity reports a serial or PCI stamp. Those stamps are not proof
 // the card is still on the bus.
 func HasIdentity(ann map[string]string) bool {
-	return claimedSerial(ann) != "" || claimedPCI(ann) != ""
+	return claimedSerial(ann) != "" || claimedPCI(ann) != "" || strings.TrimSpace(ann[ProductNameAnnotation]) != ""
 }
 
 // StripIdentity removes serial/PCI stamps so a disappeared card cannot
@@ -102,7 +102,7 @@ func IdentityAnnotations(d Device) (map[string]string, error) {
 	if !ok {
 		return nil, fmt.Errorf("device %s: no annotation keys for PCI vendor %#04x", d.PCIAddress, d.VendorID)
 	}
-	out := map[string]string{keys.Serial: d.SerialNumber}
+	out := map[string]string{keys.Serial: d.SerialNumber, ProductNameAnnotation: d.ProductName}
 	if keys.Serial == SerialNumberAnnotation {
 		if pci := DPFPCIAddress(d.PCIAddress); pci != "" {
 			out[PCIAddressAnnotation] = pci

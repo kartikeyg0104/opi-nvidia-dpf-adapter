@@ -27,6 +27,9 @@ spec:
         app.kubernetes.io/name: opi-nvidia-dpf-adapter
     spec:
       serviceAccountName: nvidia-vsp
+      # Same persistent enrollment as the hardware VSP, including card cleanup.
+      nodeSelector:
+        hardware.opiproject.org/profile: nvidia-bluefield
       securityContext:
         runAsNonRoot: false
         runAsUser: 0

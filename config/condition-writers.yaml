@@ -27,6 +27,13 @@ writers:
       group: config.openshift.io
       version: v1
       kind: DataProcessingUnit
+    type: DPFHardwareCompatible
+    writer: mapping:dataprocessingunit
+    schema: conditions
+  - object:
+      group: config.openshift.io
+      version: v1
+      kind: DataProcessingUnit
     type: DSCReady
     writer: mapping:amd-dsc200
     schema: conditions

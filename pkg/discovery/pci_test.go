@@ -243,7 +243,7 @@ func TestSupportedBlueFieldDeviceIDs(t *testing.T) {
 func TestPCIEnumeratorSkipsNVIDIAManagementWithoutFailing(t *testing.T) {
 	root := t.TempDir()
 	writePCIDevice(t, root, "0000:0f:00.0", NVIDIAVendorID, 0xa2d6, map[string][]byte{
-		"vpd": buildVPD("MT2321XZ0KVX"),
+		"vpd": buildVPD("MTEXAMPLE0002"),
 	})
 	// Function 0 management (seen as 0xc2d3 on some firmware) has no serial.
 	writePCIDevice(t, root, "0000:10:00.0", NVIDIAVendorID, 0xc2d3, nil)
@@ -252,7 +252,7 @@ func TestPCIEnumeratorSkipsNVIDIAManagementWithoutFailing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("management function must not abort the bus: %v", err)
 	}
-	if len(got) != 1 || got[0].PCIAddress != "0000:0f:00.0" || got[0].SerialNumber != "MT2321XZ0KVX" {
+	if len(got) != 1 || got[0].PCIAddress != "0000:0f:00.0" || got[0].SerialNumber != "MTEXAMPLE0002" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -260,10 +260,10 @@ func TestPCIEnumeratorSkipsNVIDIAManagementWithoutFailing(t *testing.T) {
 func TestPCIEnumeratorDeduplicatesSameSerial(t *testing.T) {
 	root := t.TempDir()
 	writePCIDevice(t, root, "0000:0f:00.0", NVIDIAVendorID, 0xa2d6, map[string][]byte{
-		"vpd": buildVPD("MT2321XZ0KVX"),
+		"vpd": buildVPD("MTEXAMPLE0002"),
 	})
 	writePCIDevice(t, root, "0000:11:00.0", NVIDIAVendorID, 0xa2d6, map[string][]byte{
-		"vpd": buildVPD("MT2321XZ0KVX"),
+		"vpd": buildVPD("MTEXAMPLE0002"),
 	})
 
 	got, err := PCIEnumerator{SysfsRoot: root}.Enumerate()

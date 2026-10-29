@@ -67,15 +67,16 @@ func TestReconcileDPUFlavorHonorsCurrentSFAnnotations(t *testing.T) {
 	src := &unstructured.Unstructured{Object: map[string]any{
 		"spec": map[string]any{
 			"nodeName":       "dh2",
-			"dpuProductName": "BlueField-2",
+			"dpuProductName": "BlueField-3",
 			"isDpuSide":      false,
 		},
 	}}
 	src.SetGroupVersionKind(dpuGVK)
-	src.SetName("dh2-bluefield-2")
+	src.SetName("bf3-worker")
 	src.SetUID("dpu-uid-reboot")
 	src.SetAnnotations(map[string]string{
-		"provisioning.dpu.nvidia.com/serial-number": "MT2321XZ0KVX",
+		"discovery.opiproject.org/product-name":     "BlueField-3",
+		"provisioning.dpu.nvidia.com/serial-number": "MTEXAMPLE0001",
 		"provisioning.dpu.nvidia.com/pci-address":   "0000-0f-00",
 		"dpu.nvidia.com/bfb-url":                    "https://example.invalid/bf.bfb",
 		"dpu.nvidia.com/pf-total-sf":                "32",
@@ -85,7 +86,7 @@ func TestReconcileDPUFlavorHonorsCurrentSFAnnotations(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(sch).WithObjects(src).WithStatusSubresource(src).Build()
 	r := &Reconciler{Client: cl, Scheme: sch, Spec: spec}
 	if _, err := r.Reconcile(context.Background(), reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "dh2-bluefield-2"},
+		NamespacedName: types.NamespacedName{Name: "bf3-worker"},
 	}); err != nil {
 		t.Fatal(err)
 	}

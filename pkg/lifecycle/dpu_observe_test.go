@@ -84,6 +84,17 @@ func TestObserveNVIDIADPUsReadyWhenNotRebooting(t *testing.T) {
 	}
 }
 
+func TestObserveNVIDIADPUsReadyOverridesHistoricalResetMethod(t *testing.T) {
+	dpu := nvidiaDPU("Ready", false)
+	_ = unstructured.SetNestedField(dpu.Object, rebootMethodSystemReset,
+		"status", "agentStatus", "rebootMethod")
+	cl := fake.NewClientBuilder().WithScheme(dpuScheme()).WithObjects(dpu).Build()
+	got := ObserveNVIDIADPUs(context.Background(), cl)
+	if !got.Ready || len(got.Rebooting) != 0 {
+		t.Fatalf("completed provisioning must not be blocked by the last reset discovery: %+v", got)
+	}
+}
+
 func TestObserveNVIDIADPUsEmptyIsUnknown(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(dpuScheme()).Build()
 	got := ObserveNVIDIADPUs(context.Background(), cl)
@@ -124,7 +135,7 @@ func TestObserveNVIDIADPUsReportsPendingNvconfig(t *testing.T) {
 				map[string]any{"name": "PF_TOTAL_SF", "current": "32", "next_boot": "0"},
 			},
 		},
-	}, "status", "lastObservedPendingNvconfig", "devices")
+	}, "status", "agentStatus", "lastObservedPendingNvconfig", "devices")
 	cl := fake.NewClientBuilder().WithScheme(dpuScheme()).WithObjects(dpu).Build()
 	got := ObserveNVIDIADPUs(context.Background(), cl)
 	if got.Ready ||
@@ -139,12 +150,11 @@ func TestObserveNVIDIADPUsReportsPendingNvconfig(t *testing.T) {
 
 func TestObserveNVIDIADPUsReadsSystemLevelReset(t *testing.T) {
 	dpu := nvidiaDPU(DPUPhaseRebooting, true)
-	_ = unstructured.SetNestedField(dpu.Object, rebootMethodSystemReset, "status", "rebootStatus", "method")
-	_ = unstructured.SetNestedField(dpu.Object, "Pending", "status", "rebootStatus", "phase")
+	_ = unstructured.SetNestedField(dpu.Object, rebootMethodSystemReset, "status", "agentStatus", "rebootMethod")
 	cl := fake.NewClientBuilder().WithScheme(dpuScheme()).WithObjects(dpu).Build()
 	got := ObserveNVIDIADPUs(context.Background(), cl)
 	if got.Ready || got.Method != rebootMethodSystemReset {
-		t.Fatalf("rebootStatus = %+v", got)
+		t.Fatalf("agent reboot method = %+v", got)
 	}
 	if !strings.Contains(got.Message, "dpf-operator-system/dh2-bluefield-2") {
 		t.Fatalf("message must name the DPU: %s", got.Message)

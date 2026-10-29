@@ -143,11 +143,12 @@ func TestLoadRealMappings(t *testing.T) {
 			"name": "worker-1",
 			"annotations": map[string]any{
 				"provisioning.dpu.nvidia.com/serial-number": "MT1234",
+				"discovery.opiproject.org/product-name":     "BlueField-3",
 				"provisioning.dpu.nvidia.com/pci-address":   "0000-03-00",
 				"dpu.nvidia.com/bfb-url":                    "https://example.invalid/bf.bfb",
 			},
 		},
-		map[string]any{"nodeName": testNodeName},
+		map[string]any{"nodeName": testNodeName, "dpuProductName": "BlueField-3"},
 	)
 	var dpuSpec *Spec
 	for _, s := range specs {

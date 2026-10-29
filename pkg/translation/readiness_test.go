@@ -67,6 +67,7 @@ func bluefieldSource() *unstructured.Unstructured {
 	src.SetName("bf3-worker")
 	src.SetUID("dpu-uid-1")
 	src.SetAnnotations(map[string]string{
+		"discovery.opiproject.org/product-name":     "BlueField-3",
 		"provisioning.dpu.nvidia.com/serial-number": "MT1234",
 		"provisioning.dpu.nvidia.com/pci-address":   "0000-03-00",
 		"dpu.nvidia.com/bfb-url":                    "https://example.invalid/bf.bfb",
