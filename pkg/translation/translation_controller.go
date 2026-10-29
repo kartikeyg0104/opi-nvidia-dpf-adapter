@@ -117,6 +117,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		log.Error(err, "mapping apply failed")
 		return ctrl.Result{}, err
 	}
+	pruneAllowed, err := mapping.ShouldPrune(r.Spec, src.Object)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	// DPF CRDs show up while the LCM Helm install is still running.
 	// VendorOperatorReady is the signal that the required APIs and
@@ -153,8 +157,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// a shrunk or renamed chain would otherwise leave its old members behind
 	// until the whole source is deleted. Prune before mirroring so the
 	// conditions reflect exactly the children that remain.
-	if err := r.pruneStaleChildren(ctx, src, emitted); err != nil {
-		return ctrl.Result{}, fmt.Errorf("prune stale children: %w", err)
+	if pruneAllowed {
+		if err := r.pruneStaleChildren(ctx, src, emitted); err != nil {
+			return ctrl.Result{}, fmt.Errorf("prune stale children: %w", err)
+		}
 	}
 
 	if err := r.mirrorStatus(ctx, src); err != nil {
@@ -421,12 +427,26 @@ func mergeConditions(existing, desired []any) ([]any, bool) {
 			continue
 		}
 		t, _ := dm[typeKey].(string)
+		if t == "" {
+			// A condition without a type is not addressable and would be
+			// keyed on "" (clobbering any later typeless entry). metav1
+			// requires a non-empty type; drop malformed mapping output
+			// rather than mirror an invalid condition onto the source.
+			continue
+		}
 		if strings.EqualFold(t, mapping.ReservedConditionType) {
 			// VSP/OPI daemon owns Ready. Never upsert it even if a mapping
 			// slipped past Validate.
 			continue
 		}
-		next := map[string]any{typeKey: t, statusKey: dm[statusKey]}
+		st, hasStatus := dm[statusKey]
+		if !hasStatus || st == nil || st == "" {
+			// metav1.Condition requires a status (True/False/Unknown). Skip
+			// rather than write a condition the apiserver will reject, which
+			// would fail the whole status update and stall status mirroring.
+			continue
+		}
+		next := map[string]any{typeKey: t, statusKey: st}
 		if v, ok := dm["reason"]; ok {
 			next["reason"] = v
 		}
@@ -435,7 +455,7 @@ func mergeConditions(existing, desired []any) ([]any, bool) {
 		}
 
 		prev, existed := byType[t]
-		if existed && prev[statusKey] == dm[statusKey] {
+		if existed && prev[statusKey] == st {
 			if ltt, ok := prev["lastTransitionTime"]; ok {
 				next["lastTransitionTime"] = ltt
 			}

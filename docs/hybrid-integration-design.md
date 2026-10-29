@@ -150,6 +150,7 @@ One writer per `(object GVK, condition type)`. Table:
 |---|---|---|---|
 | DataProcessingUnit | `Ready` | vsp-opi-daemon | conditions |
 | DataProcessingUnit | `DPFReady` | mapping:dataprocessingunit | conditions |
+| DataProcessingUnit | `DPFHardwareCompatible` | mapping:dataprocessingunit | conditions |
 | DataProcessingUnit | `DSCReady` | mapping:amd-dsc200 | conditions |
 | ServiceFunctionChain | `DPFReady` | mapping:servicefunctionchain | conditions |
 | DpuOperatorConfig | `Ready` | vsp-opi-daemon | conditions |

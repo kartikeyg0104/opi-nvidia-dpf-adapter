@@ -84,7 +84,7 @@ func ObserveNVIDIADPUs(ctx context.Context, c client.Client) DPUReport {
 		if phase == "" {
 			phase, _, _ = unstructured.NestedString(dpu.Object, statusKey, statusKey)
 		}
-		method, _, _ := unstructured.NestedString(dpu.Object, statusKey, "rebootStatus", "method")
+		method, _, _ := unstructured.NestedString(dpu.Object, statusKey, "agentStatus", "rebootMethod")
 		rebootPhase, _, _ := unstructured.NestedString(dpu.Object, statusKey, "rebootStatus", "phase")
 		if out.Phase == "" {
 			out.Phase = phase
@@ -114,7 +114,7 @@ func ObserveNVIDIADPUs(ctx context.Context, c client.Client) DPUReport {
 		if out.Pending != "" {
 			out.Message += "; pending NVCONFIG " + out.Pending
 		}
-		out.Message += "; host-power-cycle-required. " +
+		out.Message += "; DPF provisioning is waiting for the required reset. " +
 			"This adapter does not run mlxfwreset or reboot the host. " +
 			"Pending NVCONFIG is a DPF host-agent step, not an LCM install failure."
 		return out
@@ -128,7 +128,9 @@ func ObserveNVIDIADPUs(ctx context.Context, c client.Client) DPUReport {
 }
 
 func pendingNvconfigSummary(dpu unstructured.Unstructured) string {
-	devices, _, _ := unstructured.NestedSlice(dpu.Object, statusKey, "lastObservedPendingNvconfig", "devices")
+	devices, _, _ := unstructured.NestedSlice(
+		dpu.Object, statusKey, "agentStatus", "lastObservedPendingNvconfig", "devices",
+	)
 	var parts []string
 	seen := map[string]struct{}{}
 	for _, raw := range devices {
@@ -156,6 +158,11 @@ func pendingNvconfigSummary(dpu unstructured.Unstructured) string {
 func nvidiaDPUStalled(phase, method, rebootPhase string, powerCycle bool) bool {
 	if powerCycle {
 		return true
+	}
+	// The last agent discovery can outlive the reset. Completed provisioning
+	// must take precedence over that historical method.
+	if strings.EqualFold(strings.TrimSpace(phase), "Ready") {
+		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(phase)) {
 	case "rebooting", "perform arm force restart", "checking host reboot required":

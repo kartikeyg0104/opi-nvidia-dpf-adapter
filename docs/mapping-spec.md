@@ -122,6 +122,16 @@ empty, and `required: true` fails the mapping if it is still empty.
 
 ## Status mirroring
 
+The optional top-level `pruneWhen` is a CEL boolean evaluated against `source`
+before applying children. Omitted means stale children are pruned normally;
+false preserves existing children while status is still mirrored. Invalid or
+non-boolean expressions fail reconciliation before child writes or deletion.
+The NVIDIA DPU profile uses this guard while hardware identity is missing or
+ineligible, because deleting provisioned DPF resources is not a safe response
+to temporary inventory loss. Explicit source deletion still uses the cleanup
+finalizer. Service-chain mappings retain the default pruning policy for
+removed and renamed functions.
+
 `status:` is the reverse direction of `emit:` — it rolls the status of the
 emitted DPF children back onto the OPI source's `.status`. It keeps status
 roll-up as data, not Go. Rules evaluate with two CEL variables:

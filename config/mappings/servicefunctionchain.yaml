@@ -148,6 +148,6 @@ status:
   schema: conditions
   conditions:
     - type: DPFReady
-      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).size() == 0 || c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
-      reason: AllServicesReady
-      message: "All translated DPUServices, interfaces, and the chain report Ready"
+      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))"
+      reason: "(children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))) ? 'AllServicesReady' : 'ServicesNotReady'"
+      message: "(children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True'))) ? 'All translated DPUServices, interfaces, and the chain report Ready' : 'One or more translated services, interfaces, or the chain are not Ready'"

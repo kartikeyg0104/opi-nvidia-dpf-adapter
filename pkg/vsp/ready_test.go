@@ -37,7 +37,7 @@ import (
 )
 
 func TestReportReadyWritesDaemonConditionAfterHandshake(t *testing.T) {
-	dpu := newReadyDPU("dh2-bluefield-2", "dh2", "MT2321XZ0KVX")
+	dpu := newReadyDPU("dh2-bluefield-2", "dh2", "MTEXAMPLE0002")
 	_ = unstructured.SetNestedSlice(dpu.Object, []any{
 		map[string]any{
 			"type":               "DPFReady",
@@ -53,7 +53,7 @@ func TestReportReadyWritesDaemonConditionAfterHandshake(t *testing.T) {
 
 	err := ReportReady(context.Background(), cl, &HandshakeResult{
 		Devices: map[string]*HandshakeDevice{
-			"0000:0f:00.0": {ID: "MT2321XZ0KVX", Health: "HEALTHY"},
+			"0000:0f:00.0": {ID: "MTEXAMPLE0002", Health: "HEALTHY"},
 		},
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestReportReadySkipsForeignSerial(t *testing.T) {
 	dpu := newReadyDPU("other", "dh1", "AMDONLY")
 	cl := fake.NewClientBuilder().WithScheme(readyScheme(t)).WithObjects(dpu).Build()
 	if err := ReportReady(context.Background(), cl, &HandshakeResult{
-		Devices: map[string]*HandshakeDevice{"0000:0f:00.0": {ID: "MT2321XZ0KVX", Health: "HEALTHY"}},
+		Devices: map[string]*HandshakeDevice{"0000:0f:00.0": {ID: "MTEXAMPLE0002", Health: "HEALTHY"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

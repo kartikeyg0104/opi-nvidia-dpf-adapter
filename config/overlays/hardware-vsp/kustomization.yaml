@@ -1,4 +1,5 @@
 # Real BlueField: PCI scan, host /sys, socket where the OPI daemon dials.
+# Enroll verified hardware first; see docs/hardware-profiles.md.
 # Kind keeps using config/default (mock serial). On lab hardware:
 #   kubectl apply -k config/overlays/hardware-vsp
 apiVersion: kustomize.config.k8s.io/v1beta1
