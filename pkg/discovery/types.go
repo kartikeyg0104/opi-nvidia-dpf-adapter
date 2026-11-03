@@ -48,6 +48,8 @@ const (
 	BFBURLAnnotation       = "dpu.nvidia.com/bfb-url"
 	FlavorAnnotation       = "dpu.nvidia.com/flavor"
 	BFBNameAnnotation      = "dpu.nvidia.com/bfb"
+	// ProductNameAnnotation is observed inventory, not the requested OPI model.
+	ProductNameAnnotation = "discovery.opiproject.org/product-name"
 )
 
 // DPFPCIAddress converts a sysfs PCI address (0000:0f:00.0) to the DPF

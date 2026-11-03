@@ -133,6 +133,9 @@ func DefaultProductName(vendorID uint16) string {
 // hardware.
 type PCIEnumerator struct {
 	SysfsRoot string
+	// VendorID restricts inventory before reading serials. Zero enumerates all
+	// known DPU vendors; a vendor-specific firmware deployment must set this.
+	VendorID uint16
 }
 
 func (p PCIEnumerator) sysfsRoot() string {
@@ -158,6 +161,9 @@ func (p PCIEnumerator) Enumerate() ([]Device, error) {
 		devDir := filepath.Join(root, addr)
 		vendor, err := readPCIID(filepath.Join(devDir, "vendor"))
 		if err != nil {
+			continue
+		}
+		if p.VendorID != 0 && vendor != p.VendorID {
 			continue
 		}
 		spec, ok := supportedVendors[vendor]

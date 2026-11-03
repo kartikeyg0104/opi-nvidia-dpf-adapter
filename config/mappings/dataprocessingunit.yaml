@@ -13,6 +13,9 @@ source:
   group: config.openshift.io
   version: v1
   kind: DataProcessingUnit
+# Preserve provisioned hardware while inventory is missing or ineligible.
+# Explicit source deletion still runs finalizer cleanup.
+pruneWhen: "source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3'"
 # Emitted children land in the source namespace, or dpf-operator-system when
 # the source is cluster-scoped. Declared once here instead of on every emit.
 defaults:
@@ -23,10 +26,10 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: DPUDevice
-    # Vendor guard: claim BlueField only. amd-dsc200.yaml watches this same
-    # OPI kind, so without this an AMD DSC card would also sprout DPF CRs.
-    # orValue('BlueField') keeps DPF the default when dpuProductName is unset.
-    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
+    # DPF 26.4 profile: require matching requested and observed BF3 generation.
+    # BF2 remains discoverable but cannot enter this provisioning profile.
+    # Missing inventory fails closed rather than defaulting to BlueField.
+    when: "source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3'"
     # DPF hostagent names DPUDevice as lower(serial). A different name
     # (source-name + '-device') creates a second object that the webhook
     # rejects as a duplicate serial, and DPUNode never appears.
@@ -41,7 +44,7 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: DPUFlavor
-    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
+    when: "source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3'"
     name:
       cel: "source.metadata.?annotations['dpu.nvidia.com/flavor'].orValue('dpf-default-flavor')"
     fields:
@@ -79,7 +82,7 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: BFB
-    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
+    when: "source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3'"
     name:
       cel: "source.metadata.?annotations['dpu.nvidia.com/bfb'].orValue('bf-bundle')"
     fields:
@@ -91,7 +94,7 @@ emit:
       group: provisioning.dpu.nvidia.com
       version: v1alpha1
       kind: DPU
-    when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
+    when: "source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3'"
     name:
       from: metadata.name
     fields:
@@ -99,6 +102,9 @@ emit:
       - to: spec.dpuNodeName
         from: spec.nodeName
         required: true
+      # DPF host-agent and DPUNode controllers select DPUs by this label.
+      - to: metadata.labels
+        cel: "{'provisioning.dpu.nvidia.com/dpunode-name': source.spec.nodeName}"
       # Required DPF fields with no OPI counterpart — defaults / annotations
       - to: spec.dpuDeviceName
         cel: "source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue(source.metadata.name + '-device').lowerAscii()"
@@ -140,15 +146,19 @@ emit:
 # DPUFlavor has no phase and no conditions and stays non-blocking.
 # phase=OS Installing / Initializing / Rebooting is not Ready.
 status:
-  # Ownership gate, matching the per-emit guards above. Without it this block
-  # still evaluated on an AMD card -- over zero children -- and parked
-  # DPFReady=False on hardware this mapping owns nothing of.
-  when: "source.spec.?dpuProductName.orValue('BlueField').startsWith('BlueField')"
+  # Own NVIDIA compatibility reporting even when provisioning is blocked.
+  # Foreign vendors without observed BlueField inventory remain untouched.
+  when: "(source.spec.?dpuProductName.orValue('').startsWith('BlueField') || source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('').startsWith('BlueField')) || source.metadata.?annotations['provisioning.dpu.nvidia.com/serial-number'].orValue('') != '' || source.?status.?conditions.orValue([]).exists(c, c.type in ['DPFReady', 'DPFHardwareCompatible'])"
   # DataProcessingUnit CRD declares status.conditions; DPFReady is stored.
   # Ready and its schema fields (lastTransitionTime, observedGeneration) stay.
   schema: conditions
   conditions:
     - type: DPFReady
-      status: "children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True') || c.?status.?phase.orValue('') == 'Ready' || (c.?status.?conditions.orValue([]).size() == 0 && c.?status.?phase.orValue('') == ''))"
-      reason: "children.exists(c, c.?status.?phase.orValue('') == 'Rebooting') ? 'Rebooting' : 'AllChildrenReady'"
-      message: "children.exists(c, c.?status.?phase.orValue('') == 'Rebooting') ? 'NVIDIA DPU child is Rebooting; host reset is DPF ask, this adapter does not run mlxfwreset' : 'All emitted DPF objects report Ready (condition or phase)'"
+      status: "(source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3') && (children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True') || c.?status.?phase.orValue('') == 'Ready' || c.?kind.orValue('') == 'DPUFlavor'))"
+      reason: "!(source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3') ? (source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == '' ? 'HardwareIdentityMissing' : (source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') != 'BlueField-3' ? 'UnsupportedHardware' : (source.spec.?dpuProductName.orValue('') != 'BlueField-3' ? 'HardwareIdentityMismatch' : 'SupportedGeneration'))) : (children.exists(c, c.?status.?phase.orValue('') == 'Rebooting') ? 'Rebooting' : ((children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True') || c.?status.?phase.orValue('') == 'Ready' || c.?kind.orValue('') == 'DPUFlavor')) ? 'AllChildrenReady' : 'ChildrenNotReady'))"
+      message: "!(source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3') ? ((source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3') ? 'BlueField-3 generation is eligible for the DPF 26.4 profile; verify exact SKU, firmware, host OS and physical dataplane separately' : ('DPF 26.4 profile requires matching declared and observed BlueField-3 hardware; observed=' + source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue(''))) : (children.exists(c, c.?status.?phase.orValue('') == 'Rebooting') ? 'NVIDIA DPU child is Rebooting; the required reset is managed by DPF' : ((children.size() > 0 && children.all(c, c.?status.?conditions.orValue([]).exists(cond, cond.type == 'Ready' && cond.status == 'True') || c.?status.?phase.orValue('') == 'Ready' || c.?kind.orValue('') == 'DPUFlavor')) ? 'All emitted DPF objects report Ready' : 'One or more emitted DPF resources are not Ready'))"
+    # Generation eligibility is separate from inventory and runtime readiness.
+    - type: DPFHardwareCompatible
+      status: "source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3'"
+      reason: "source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == '' ? 'HardwareIdentityMissing' : (source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') != 'BlueField-3' ? 'UnsupportedHardware' : (source.spec.?dpuProductName.orValue('') != 'BlueField-3' ? 'HardwareIdentityMismatch' : 'SupportedGeneration'))"
+      message: "(source.spec.?dpuProductName.orValue('') == 'BlueField-3' && source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue('') == 'BlueField-3') ? 'BlueField-3 generation is eligible for the DPF 26.4 profile; verify exact SKU, firmware, host OS and physical dataplane separately' : ('DPF 26.4 profile requires matching declared and observed BlueField-3 hardware; observed=' + source.metadata.?annotations['discovery.opiproject.org/product-name'].orValue(''))"

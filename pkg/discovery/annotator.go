@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -38,6 +39,9 @@ type Annotator struct {
 	Scheme     *runtime.Scheme
 	Enumerator Enumerator
 	NodeName   string
+	// VendorID limits the OPI sources owned by a vendor-specific PCI deployment.
+	// Zero retains generic multi-vendor discovery.
+	VendorID uint16
 	// FirmwareURL, Flavor and FirmwareName are vendor-neutral VALUES. The
 	// annotation KEY each one is written under is chosen per vendor from
 	// AnnotationsFor, so the same operand serves a BlueField and a DSC.
@@ -61,6 +65,9 @@ func (a *Annotator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	node, _, _ := unstructured.NestedString(dpu.Object, "spec", "nodeName")
 	if a.NodeName != "" && node != a.NodeName {
 		return ctrl.Result{}, nil
+	}
+	if !a.ownsSource(dpu) {
+		return ctrl.Result{RequeueAfter: InventoryRefresh}, nil
 	}
 
 	live, err := LiveDevices(a.Enumerator)
@@ -109,6 +116,9 @@ func (a *Annotator) nodeViews(ctx context.Context, node string) ([]DPUView, erro
 	views := make([]DPUView, 0, len(list.Items))
 	for i := range list.Items {
 		item := &list.Items[i]
+		if !a.ownsSource(item) {
+			continue
+		}
 		itemNode, _, _ := unstructured.NestedString(item.Object, "spec", "nodeName")
 		if node != "" && itemNode != node {
 			continue
@@ -116,6 +126,25 @@ func (a *Annotator) nodeViews(ctx context.Context, node string) ([]DPUView, erro
 		views = append(views, DPUView{Name: item.GetName(), Annotations: item.GetAnnotations()})
 	}
 	return views, nil
+}
+
+// Restricted deployments require an explicit requested vendor. This prevents
+// a NVIDIA-only inventory from claiming or clearing another vendor's source.
+func (a *Annotator) ownsSource(dpu *unstructured.Unstructured) bool {
+	if a.VendorID == 0 {
+		return true
+	}
+	product, _, _ := unstructured.NestedString(dpu.Object, "spec", "dpuProductName")
+	switch a.VendorID {
+	case NVIDIAVendorID:
+		return strings.HasPrefix(product, "BlueField")
+	case AMDVendorID:
+		return strings.HasPrefix(product, "Pensando") || strings.HasPrefix(product, "DSC")
+	case MarvellVendorID:
+		return strings.HasPrefix(product, "Marvell") || strings.HasPrefix(product, "OCTEON")
+	default:
+		return false
+	}
 }
 
 func (a *Annotator) desiredAnnotations(have map[string]string, asg Assignment) (map[string]string, error) {

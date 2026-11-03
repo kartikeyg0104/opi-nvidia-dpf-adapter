@@ -20,6 +20,11 @@ import "strings"
 // SchemaHasPath reports whether a dotted OpenAPI path exists on a CRD
 // openAPIV3Schema. Slice steps use a [] suffix (spec.networkFunctions[].chart).
 func SchemaHasPath(root map[string]any, dotted string) bool {
+	// Kubernetes supplies these ObjectMeta maps even when controller-gen
+	// emits only metadata: {type: object}. Keep other paths schema-checked.
+	if dotted == "metadata.labels" || dotted == "metadata.annotations" {
+		return SchemaHasPath(root, "metadata")
+	}
 	parts := strings.Split(dotted, ".")
 	node := root
 	for _, part := range parts {

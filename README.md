@@ -308,7 +308,7 @@ make verify-api
 
 Translator, PCI VSP, and DPF v26.4.0 are running on lab host dh2
 (k3s v1.36.4+k3s1). `GetDevices` returns the BlueField serial
-`MT2321XZ0KVX`. Mapped writes that were dead are now live:
+`<discovered-serial>`. Mapped writes that were dead are now live:
 
 | API | Lab result |
 |---|---|

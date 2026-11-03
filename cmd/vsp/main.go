@@ -60,6 +60,7 @@ func main() {
 		pciAddress   string
 		productName  string
 		vendorName   string
+		pciVendor    string
 		firmwareURL  string
 		bfbURL       string
 		flavor       string
@@ -94,6 +95,8 @@ func main() {
 	flag.StringVar(&bfbName, "bfb-name", "", "deprecated alias for --firmware-name")
 	flag.BoolVar(&usePCI, "pci", false,
 		"scan sysfs for any supported DPU vendor instead of using --serial-number")
+	flag.StringVar(&pciVendor, "pci-vendor", "",
+		"restrict --pci inventory to this vendor (nvidia, amd, marvell or hex ID); empty scans all")
 	flag.StringVar(&grpcSocket, "grpc-socket", vsp.DefaultSocket,
 		"unix socket the dpu-operator daemon dials")
 	flag.BoolVar(&grpcOnly, "grpc-only", false,
@@ -120,9 +123,22 @@ func main() {
 	}
 
 	var enumerator discovery.Enumerator
+	var filter uint16
 	if usePCI {
-		enumerator = discovery.PCIEnumerator{}
+		if pciVendor != "" {
+			id, err := discovery.ParseVendor(pciVendor)
+			if err != nil {
+				setupLog.Error(err, "invalid --pci-vendor")
+				os.Exit(1)
+			}
+			filter = id
+		}
+		enumerator = discovery.PCIEnumerator{VendorID: filter}
 	} else {
+		if pciVendor != "" {
+			setupLog.Info("--pci-vendor requires --pci")
+			os.Exit(1)
+		}
 		if serialNumber == "" {
 			setupLog.Info("either --serial-number or --pci is required")
 			os.Exit(1)
@@ -166,6 +182,7 @@ func main() {
 		Scheme:       mgr.GetScheme(),
 		Enumerator:   enumerator,
 		NodeName:     nodeName,
+		VendorID:     filter,
 		FirmwareURL:  firmwareURL,
 		Flavor:       flavor,
 		FirmwareName: firmwareName,

@@ -26,16 +26,17 @@ import (
 
 func blueFieldSource(annotations map[string]any) map[string]any {
 	meta := map[string]any{
-		"name": "dh2-bluefield-2",
+		"name": "bf3-worker",
 		"annotations": map[string]any{
-			"provisioning.dpu.nvidia.com/serial-number": "MT2321XZ0KVX",
+			"provisioning.dpu.nvidia.com/serial-number": "MTEXAMPLE0001",
 			"provisioning.dpu.nvidia.com/pci-address":   "0000-0f-00",
 			"dpu.nvidia.com/bfb-url":                    "https://example.invalid/bf.bfb",
+			"discovery.opiproject.org/product-name":     "BlueField-3",
 		},
 	}
 	maps.Copy(meta["annotations"].(map[string]any), annotations)
 	return object(meta, map[string]any{
-		"dpuProductName": "BlueField-2",
+		"dpuProductName": "BlueField-3",
 		"nodeName":       "dh2",
 	})
 }
@@ -153,8 +154,11 @@ func TestDPFReadyReasonRebootingWhenDPUPhaseRebooting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := object(map[string]any{"name": "dh2-bluefield-2"}, map[string]any{
-		"dpuProductName": "BlueField-2",
+	src := object(map[string]any{
+		"name":        "bf3-worker",
+		"annotations": map[string]any{"discovery.opiproject.org/product-name": "BlueField-3"},
+	}, map[string]any{
+		"dpuProductName": "BlueField-3",
 		"nodeName":       "dh2",
 	})
 	dpu := map[string]any{
@@ -179,13 +183,53 @@ func TestDPFReadyReasonRebootingWhenDPUPhaseRebooting(t *testing.T) {
 	}
 }
 
+func TestNVIDIANotReadyConditionsDescribePendingChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, reason string
+		children           []any
+	}{
+		{"provisioning", "dataprocessingunit.yaml", "ChildrenNotReady", []any{
+			map[string]any{"kind": "DPU", "status": map[string]any{"phase": "Initializing"}},
+		}},
+		{"services", "servicefunctionchain.yaml", "ServicesNotReady", []any{
+			map[string]any{"kind": "DPUService", "status": map[string]any{"conditions": []any{
+				map[string]any{"type": "Ready", "status": "False"},
+			}}},
+		}},
+		{"unobserved-services", "servicefunctionchain.yaml", "ServicesNotReady", []any{
+			map[string]any{"kind": "DPUService"},
+		}},
+		{"unobserved-device", "dataprocessingunit.yaml", "ChildrenNotReady", []any{
+			map[string]any{"kind": "DPUDevice"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec, err := LoadFile(mappingDir + "/" + tc.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := ApplyStatus(spec, blueFieldSource(nil), tc.children)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := conditionByType(t, status, "DPFReady")
+			if got["status"] != "False" || got["reason"] != tc.reason {
+				t.Fatalf("pending children must not report a success reason: %v", got)
+			}
+		})
+	}
+}
+
 func TestDPFReadyFalseWhileDPUInitializing(t *testing.T) {
 	spec, err := LoadFile(mappingDir + "/dataprocessingunit.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := object(map[string]any{"name": "dh2-bluefield-2"}, map[string]any{
-		"dpuProductName": "BlueField-2",
+	src := object(map[string]any{
+		"name":        "bf3-worker",
+		"annotations": map[string]any{"discovery.opiproject.org/product-name": "BlueField-3"},
+	}, map[string]any{
+		"dpuProductName": "BlueField-3",
 		"nodeName":       "dh2",
 	})
 	children := []any{
@@ -208,8 +252,11 @@ func TestDPFReadyFalseWhileOSInstalling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := object(map[string]any{"name": "dh2-bluefield-2"}, map[string]any{
-		"dpuProductName": "BlueField-2",
+	src := object(map[string]any{
+		"name":        "bf3-worker",
+		"annotations": map[string]any{"discovery.opiproject.org/product-name": "BlueField-3"},
+	}, map[string]any{
+		"dpuProductName": "BlueField-3",
 		"nodeName":       "dh2",
 	})
 	dpu := map[string]any{
@@ -238,8 +285,11 @@ func TestDPFReadyTrueWhenDPUPhaseReadyWithoutReadyCondition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := object(map[string]any{"name": "dh2-bluefield-2"}, map[string]any{
-		"dpuProductName": "BlueField-2",
+	src := object(map[string]any{
+		"name":        "bf3-worker",
+		"annotations": map[string]any{"discovery.opiproject.org/product-name": "BlueField-3"},
+	}, map[string]any{
+		"dpuProductName": "BlueField-3",
 		"nodeName":       "dh2",
 	})
 	dpu := map[string]any{
@@ -267,8 +317,11 @@ func TestDPFReadyTrueWhenReadyConditionSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := object(map[string]any{"name": "dh2-bluefield-2"}, map[string]any{
-		"dpuProductName": "BlueField-2",
+	src := object(map[string]any{
+		"name":        "bf3-worker",
+		"annotations": map[string]any{"discovery.opiproject.org/product-name": "BlueField-3"},
+	}, map[string]any{
+		"dpuProductName": "BlueField-3",
 		"nodeName":       "dh2",
 	})
 	ready := map[string]any{
@@ -304,8 +357,11 @@ func TestApplyStatusKeepsDaemonReadyCondition(t *testing.T) {
 		"lastTransitionTime": "2026-10-25T05:37:47Z",
 		"observedGeneration": int64(4),
 	}
-	src := object(map[string]any{"name": "dh2-bluefield-2"}, map[string]any{
-		"dpuProductName": "BlueField-2",
+	src := object(map[string]any{
+		"name":        "bf3-worker",
+		"annotations": map[string]any{"discovery.opiproject.org/product-name": "BlueField-3"},
+	}, map[string]any{
+		"dpuProductName": "BlueField-3",
 		"nodeName":       "dh2",
 	})
 	src["status"] = map[string]any{"conditions": []any{ready}}
@@ -331,8 +387,8 @@ func TestApplyStatusKeepsDaemonReadyCondition(t *testing.T) {
 		t.Fatalf("DPFReady=%v, want True", got)
 	}
 	conds := st["conditions"].([]any)
-	if len(conds) != 2 {
-		t.Fatalf("conditions=%d, want Ready preserved and DPFReady added", len(conds))
+	if len(conds) != 3 {
+		t.Fatalf("conditions=%d, want Ready preserved, DPFReady and compatibility added", len(conds))
 	}
 }
 

@@ -112,7 +112,7 @@ scratch layer, docker-archive tar, `k3s ctr images import`.
 | ClusterRole | `opi-nvidia-dpf-adapter-nvidia-vsp-role` patched with `dpuoperatorconfigs` + both `/status` subresources |
 | VSP DS | stays on `controller:latest` (`/vsp`, container name `vsp`, serves the vendor-plugin socket) |
 | New DS | `opi-nvidia-dpf-adapter-opi-daemon`, SA `opi-nvidia-dpf-adapter-nvidia-vsp`, 1/1 Running |
-| Handshake | `Init/GetDevices ok`, device `MT2321XZ0KVX` at `0000:0f:00.0`, health Healthy |
+| Handshake | `Init/GetDevices ok`, device `<discovered-serial>` at `0000:0f:00.0`, health Healthy |
 | DPU condition | `Ready=True reason=DeviceHealthy` on `dh2-bluefield-2` |
 | DpuOperatorConfig condition | `Ready=True reason=DeviceHealthy` on `dpu-operator-config` |
 

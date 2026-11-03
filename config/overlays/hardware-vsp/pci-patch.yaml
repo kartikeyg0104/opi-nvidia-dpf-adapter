@@ -10,6 +10,7 @@
   path: /spec/template/spec/containers/0/args
   value:
     - --pci
+    - --pci-vendor=nvidia
     - --metrics-bind-address=0
     - --health-probe-bind-address=:8082
 - op: replace
@@ -54,3 +55,9 @@
 # official hostPath with config/opi-daemon instead.
 - op: remove
   path: /spec/template/spec/containers/1
+# Persistent operator enrollment keeps inventory running after card removal.
+# Check real BlueField PCI identity before applying this node profile label.
+- op: add
+  path: /spec/template/spec/nodeSelector
+  value:
+    hardware.opiproject.org/profile: nvidia-bluefield

@@ -56,6 +56,9 @@ type Spec struct {
 	Defaults   *Defaults      `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 	Emit       []Emit         `json:"emit" yaml:"emit"`
 	Status     *StatusMapping `json:"status,omitempty" yaml:"status,omitempty"`
+	// PruneWhen gates stale-child deletion independently of emission. Empty
+	// keeps the default cleanup policy; false retains resources for recovery.
+	PruneWhen string `json:"pruneWhen,omitempty" yaml:"pruneWhen,omitempty"`
 }
 
 // Metadata names a mapping document.

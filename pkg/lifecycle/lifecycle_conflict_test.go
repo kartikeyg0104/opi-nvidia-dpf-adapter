@@ -133,8 +133,8 @@ func TestMainDefaultsLeaderElect(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(b)
-	if !strings.Contains(src, `flag.BoolVar(&enableLeaderElection, "leader-elect", true`) {
-		t.Fatal("cmd/main.go must default --leader-elect to true so a second replica does not 409 the same DpuOperatorConfig")
+	if !strings.Contains(src, `flag.BoolVar(&enableLeaderElection, "leader-elect", false`) {
+		t.Fatal("cmd/main.go must default --leader-elect to false; multi-replica deployments must enable it explicitly")
 	}
 }
 

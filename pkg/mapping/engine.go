@@ -34,6 +34,19 @@ const (
 	typeKey         = "type"
 )
 
+// ShouldPrune evaluates the optional source-level cleanup guard. Invalid or
+// non-boolean expressions return an error; callers must not delete on error.
+func ShouldPrune(spec *Spec, source map[string]any) (bool, error) {
+	if spec.PruneWhen == "" {
+		return true, nil
+	}
+	allowed, err := evalBool(spec.PruneWhen, celVars(source, nil, nil))
+	if err != nil {
+		return false, fmt.Errorf("pruneWhen: %w", err)
+	}
+	return allowed, nil
+}
+
 // Label keys used to locate emitted children for status roll-up. Exported so
 // the controller builds the same selector the engine stamps.
 const (

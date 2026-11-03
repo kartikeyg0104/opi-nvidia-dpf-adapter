@@ -110,7 +110,6 @@ var _ = Describe("Leader Election and Singleton Controller Failover", func() {
 		Consistently(standbyLeader.Elected()).
 			WithTimeout(1 * time.Second).WithPolling(100 * time.Millisecond).
 			ShouldNot(BeClosed())
-
 		By("verifying the Lease object exists and holder is active")
 		lease := &coordinationv1.Lease{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: leaseName, Namespace: leaseNS}, lease)).To(Succeed())
@@ -125,7 +124,6 @@ var _ = Describe("Leader Election and Singleton Controller Failover", func() {
 		Eventually(standbyLeader.Elected()).
 			WithTimeout(10 * time.Second).WithPolling(100 * time.Millisecond).
 			Should(BeClosed())
-
 		By("verifying the Lease object holder has switched to the new leader")
 		Eventually(func(g Gomega) {
 			l := &coordinationv1.Lease{}
